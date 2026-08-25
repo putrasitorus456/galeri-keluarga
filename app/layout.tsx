@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { BusyProvider } from "@/components/Loading";
-import { InstallPrompt } from "@/components/InstallPrompt";
 import "./globals.css";
 
 const sans = Inter({
@@ -50,10 +49,7 @@ export default function RootLayout({
       <body
         className={`${sans.variable} min-h-dvh bg-black font-sans text-ink antialiased`}
       >
-        <BusyProvider>
-          {children}
-          <InstallPrompt />
-        </BusyProvider>
+        <BusyProvider>{children}</BusyProvider>
       </body>
     </html>
   );
