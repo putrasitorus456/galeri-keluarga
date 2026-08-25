@@ -1,0 +1,144 @@
+@import "tailwindcss";
+
+:root {
+  --paper: #000000;
+  --paper-deep: #1c1c1e;
+  --surface: #1c1c1e;
+  --ink: #ffffff;
+  --muted: #8e8e93;
+  --line: #2c2c2e;
+  --forest: #3a3a3c;
+  --forest-hover: #48484a;
+  --gold: #aeaeb2;
+  --danger: #ff453a;
+  --night: #000000;
+  --dock: #2c2c2e;
+  --background: var(--paper);
+  --foreground: var(--ink);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-paper: var(--paper);
+  --color-paper-deep: var(--paper-deep);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-forest: var(--forest);
+  --color-forest-hover: var(--forest-hover);
+  --color-gold: var(--gold);
+  --color-danger: var(--danger);
+  --color-night: var(--night);
+  --color-dock: var(--dock);
+  --font-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+html {
+  color-scheme: dark;
+}
+
+html,
+body {
+  min-height: 100dvh;
+  background-color: #000;
+}
+
+body {
+  color: var(--ink);
+}
+
+::selection {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.glass-tab {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+}
+
+.glass-tab-active {
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.32);
+}
+
+.pulse-dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 8px;
+}
+
+.pulse-dots > span {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.28;
+  animation: pulse-dot 1.15s ease-in-out infinite;
+}
+
+.pulse-dots > span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.pulse-dots > span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 0.28;
+    transform: translateY(0) scale(0.85);
+  }
+  45% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1);
+  }
+}
+
+.progress-indeterminate {
+  height: 3px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.progress-indeterminate::after {
+  content: "";
+  display: block;
+  height: 100%;
+  width: 38%;
+  border-radius: 999px;
+  background: #fff;
+  animation: progress-slide 1.05s ease-in-out infinite;
+}
+
+@keyframes progress-slide {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
