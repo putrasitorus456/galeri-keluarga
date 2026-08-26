@@ -5,13 +5,30 @@ function isIOS() {
   return /iPad|iPhone|iPod/.test(navigator.userAgent);
 }
 
-export async function downloadMedia(item: MediaItem) {
+function mp4Name(filename: string) {
+  return filename.replace(/\.[^.]+$/, "") + ".mp4";
+}
+
+/**
+ * `transcoded` asks the server for the H.264 copy instead of the original,
+ * which is what a viewer wants when their device could not decode the source.
+ */
+export async function downloadMedia(
+  item: MediaItem,
+  options: { transcoded?: boolean } = {},
+) {
+  const url = options.transcoded
+    ? `${item.downloadUrl}?transcode=1`
+    : item.downloadUrl;
+  const name = options.transcoded ? mp4Name(item.name) : item.name;
+  const mimeType = options.transcoded ? "video/mp4" : item.mimeType;
+
   if (isIOS() && navigator.canShare) {
     try {
-      const res = await fetch(item.downloadUrl, { credentials: "include" });
+      const res = await fetch(url, { credentials: "include" });
       if (res.ok) {
         const blob = await res.blob();
-        const file = new File([blob], item.name, { type: item.mimeType });
+        const file = new File([blob], name, { type: mimeType });
         if (navigator.canShare({ files: [file] })) {
           await navigator.share({ files: [file], title: item.name });
           return;
@@ -23,8 +40,8 @@ export async function downloadMedia(item: MediaItem) {
   }
 
   const link = document.createElement("a");
-  link.href = item.downloadUrl;
-  link.download = item.name;
+  link.href = url;
+  link.download = name;
   link.rel = "noopener";
   document.body.appendChild(link);
   link.click();

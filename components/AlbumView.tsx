@@ -7,6 +7,7 @@ import { formatDuration, formatItemCount } from "@/lib/format";
 import {
   cacheClear,
   cacheGet,
+  cacheMediaList,
   cacheSet,
   libraryCacheKey,
   prefetchLibrary,
@@ -25,6 +26,7 @@ type LibraryOptions = {
   title: string;
   type?: "image" | "video" | "gif";
   collection?: string;
+  basePath?: string;
 };
 
 export function AlbumView({
@@ -93,6 +95,7 @@ export function AlbumView({
         setNextPageToken(data.nextPageToken);
         setTotal(data.total);
         if (!append) cacheSet(cacheKey, data);
+        else cacheMediaList(data.items, albumId);
         if (library?.type === "image" || library?.type === "video") {
           void prefetchLibrary();
         }
@@ -340,9 +343,11 @@ export function AlbumView({
                     ) : (
                       <BusyLink
                         href={
-                          item.albumId || albumId
-                            ? `/album/${item.albumId ?? albumId}/${item.id}`
-                            : `/m/${item.id}`
+                          library?.basePath
+                            ? `${library.basePath}/${item.id}`
+                            : item.albumId || albumId
+                              ? `/album/${item.albumId ?? albumId}/${item.id}`
+                              : `/m/${item.id}`
                         }
                         label="Membuka kenangan"
                         className="absolute inset-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"

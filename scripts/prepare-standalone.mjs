@@ -15,4 +15,14 @@ cpSync(join(root, ".next", "static"), join(standalone, ".next", "static"), {
   recursive: true,
 });
 
-console.log("Standalone siap (public + static disalin).");
+// Next's file tracing misses these because they are binaries, not imports.
+for (const pkg of ["ffmpeg-static", "ffprobe-static"]) {
+  const from = join(root, "node_modules", pkg);
+  if (!existsSync(from)) {
+    console.error(`Paket ${pkg} tidak ditemukan; video HEVC tidak akan bisa dikonversi.`);
+    process.exit(1);
+  }
+  cpSync(from, join(standalone, "node_modules", pkg), { recursive: true });
+}
+
+console.log("Standalone siap (public + static + binari ffmpeg disalin).");

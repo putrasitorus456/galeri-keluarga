@@ -13,6 +13,8 @@
   "dependencies": {
     "@serwist/next": "^9.5.12",
     "bcryptjs": "^3.0.3",
+    "ffmpeg-static": "^5.3.0",
+    "ffprobe-static": "^3.1.0",
     "googleapis": "^176.0.0",
     "heic-convert": "^2.1.0",
     "jose": "^6.2.10",
@@ -23,6 +25,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
+    "@types/ffprobe-static": "^2.0.3",
     "@types/heic-convert": "^2.1.1",
     "@types/node": "^20",
     "@types/react": "^19",

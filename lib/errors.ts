@@ -22,6 +22,10 @@ export const MESSAGES = {
   config:
     "Aplikasi belum terhubung ke Google Drive. Periksa konfigurasi server.",
   notFound: "Foto/video ini tidak dapat dibuka.",
+  videoUnsupported:
+    "Video ini tidak dapat diputar di browser Anda. Coba unduh videonya.",
+  videoTooLarge:
+    "Video ini terlalu besar untuk dikonversi. Silakan unduh untuk menontonnya.",
   albumEmpty: "Belum ada foto di album ini.",
   albumsEmpty: "Belum ada album.",
   network: "Tidak dapat terhubung ke internet. Coba lagi.",

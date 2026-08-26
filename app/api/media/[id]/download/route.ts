@@ -1,7 +1,12 @@
 import { getSession } from "@/lib/auth";
 import { getFileStream, getMediaMeta } from "@/lib/drive";
 import { errorResponse, unauthorized } from "@/lib/http";
-import { contentDisposition, nodeStreamToWeb } from "@/lib/stream";
+import {
+  contentDisposition,
+  localFileResponse,
+  nodeStreamToWeb,
+} from "@/lib/stream";
+import { getPlayableVideo, mp4PreviewName } from "@/lib/video";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +24,22 @@ export async function GET(
   try {
     const meta = await getMediaMeta(id);
     const range = request.headers.get("range");
+
+    const wantsMp4 =
+      new URL(request.url).searchParams.get("transcode") === "1" &&
+      meta.mimeType.startsWith("video/");
+    if (wantsMp4) {
+      const playable = await getPlayableVideo(id, meta.size);
+      return localFileResponse(playable.path, playable.size, range, {
+        "Content-Type": "video/mp4",
+        "Cache-Control": "private, max-age=3600",
+        "Content-Disposition": contentDisposition(
+          mp4PreviewName(meta.name),
+          false,
+        ),
+      });
+    }
+
     const { stream, status, headers } = await getFileStream(id, range, {
       alreadyVerified: true,
     });

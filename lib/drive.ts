@@ -538,6 +538,7 @@ export async function getMediaMeta(fileId: string) {
     thumbnailLink: file.thumbnailLink ?? null,
     mimeType: file.mimeType!,
     name: file.name!,
+    size: Number(file.size ?? 0),
   };
 }
 

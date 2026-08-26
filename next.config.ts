@@ -12,7 +12,14 @@ const withSerwist = withSerwistInit({
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  serverExternalPackages: ["googleapis", "heic-convert", "heic-decode", "libheif-js"],
+  serverExternalPackages: [
+    "googleapis",
+    "heic-convert",
+    "heic-decode",
+    "libheif-js",
+    "ffmpeg-static",
+    "ffprobe-static",
+  ],
 };
 
 export default withSerwist(nextConfig);

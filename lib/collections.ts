@@ -1,6 +1,21 @@
-import type { Album } from "@/lib/types";
+import type { Album, LibraryKind } from "@/lib/types";
 
 export const TERBARU_LIMIT = 6;
+
+export type LibraryKindDef = { title: string; type?: LibraryKind };
+
+const LIBRARY_KINDS: Record<string, LibraryKindDef> = {
+  foto: { title: "Foto", type: "image" },
+  video: { title: "Video", type: "video" },
+  gif: { title: "GIF", type: "gif" },
+  terbaru: { title: "Semua kenangan" },
+};
+
+export function getLibraryKind(kind: string): LibraryKindDef | undefined {
+  return Object.prototype.hasOwnProperty.call(LIBRARY_KINDS, kind)
+    ? LIBRARY_KINDS[kind]
+    : undefined;
+}
 
 export const COLLECTION_DEFS = [
   { slug: "wisuda", label: "Wisuda", pattern: /wisuda/i },

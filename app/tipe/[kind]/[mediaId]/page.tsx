@@ -1,17 +1,18 @@
 import { notFound } from "next/navigation";
-import { AlbumView } from "@/components/AlbumView";
+import { MediaViewer } from "@/components/MediaViewer";
 import { getLibraryKind } from "@/lib/collections";
 
-export default async function TipePage({
+export default async function TipeMediaPage({
   params,
 }: {
-  params: Promise<{ kind: string }>;
+  params: Promise<{ kind: string; mediaId: string }>;
 }) {
-  const { kind } = await params;
+  const { kind, mediaId } = await params;
   const spec = getLibraryKind(kind);
   if (!spec) notFound();
   return (
-    <AlbumView
+    <MediaViewer
+      mediaId={mediaId}
       library={{ ...spec, basePath: `/tipe/${kind}` }}
     />
   );

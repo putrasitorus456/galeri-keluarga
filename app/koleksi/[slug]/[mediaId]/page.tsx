@@ -1,17 +1,18 @@
 import { notFound } from "next/navigation";
-import { AlbumView } from "@/components/AlbumView";
+import { MediaViewer } from "@/components/MediaViewer";
 import { getCollectionDef } from "@/lib/collections";
 
-export default async function KoleksiPage({
+export default async function KoleksiMediaPage({
   params,
 }: {
-  params: Promise<{ slug: string }>;
+  params: Promise<{ slug: string; mediaId: string }>;
 }) {
-  const { slug } = await params;
+  const { slug, mediaId } = await params;
   const def = getCollectionDef(slug);
   if (!def) notFound();
   return (
-    <AlbumView
+    <MediaViewer
+      mediaId={mediaId}
       library={{
         title: def.label,
         collection: def.slug,

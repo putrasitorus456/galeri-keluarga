@@ -9,6 +9,7 @@ import {
 } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { getCachedMedia } from "@/lib/gallery-cache";
 
 type BusyContextValue = {
   busy: string | null;
@@ -120,6 +121,11 @@ export function LoadingPanel({ label }: { label: string }) {
   );
 }
 
+function hasInstantMediaView(path: string) {
+  const mediaId = path.match(/^\/(?:album|koleksi|tipe)\/[^/]+\/([^/]+)$/)?.[1];
+  return Boolean(mediaId && getCachedMedia(mediaId));
+}
+
 function BusyOverlay({ label }: { label: string }) {
   return (
     <div
@@ -174,7 +180,7 @@ export function BusyLink({
         if (event.defaultPrevented) return;
         if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         const path = href.split("?")[0];
-        if (path !== pathname) show(label);
+        if (path !== pathname && !hasInstantMediaView(path)) show(label);
       }}
     >
       {children}
