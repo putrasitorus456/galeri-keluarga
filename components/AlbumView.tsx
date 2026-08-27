@@ -1,24 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useLayoutEffect, useState } from "react";
 import { apiFetch, userMessage } from "@/lib/api-client";
 import { MESSAGES } from "@/lib/errors";
 import { formatDuration, formatItemCount } from "@/lib/format";
 import {
   cacheClear,
   cacheGet,
+  cacheIsFresh,
   cacheMediaList,
   cacheSet,
   libraryCacheKey,
-  prefetchLibrary,
+  warmMedia,
 } from "@/lib/gallery-cache";
-import { downloadMedia, sleep } from "@/lib/share-download";
+import { useScrollMemory } from "@/lib/use-scroll-memory";
 import type { Album, MediaItem, MediaListResponse, MediaType } from "@/lib/types";
 import { AppHeader } from "@/components/AppHeader";
 import { ActionMenu, BottomDock, IconButton } from "@/components/Chrome";
+import { useDownloadFlow } from "@/components/DownloadPopup";
 import { IconCheck, IconDownload, IconLogout, IconPlay, IconRefresh, IconSort } from "@/components/Icons";
-import { BusyLink, LoadingPanel, Spinner, ThumbImage, useBusy } from "@/components/Loading";
-import { EmptyState, ErrorState } from "@/components/States";
+import { BusyLink, Spinner, ThumbImage } from "@/components/Loading";
+import { EmptyState, ErrorState, MediaSkeleton } from "@/components/States";
 
 type Filter = "all" | MediaType;
 
@@ -36,7 +38,6 @@ export function AlbumView({
   albumId?: string;
   library?: LibraryOptions;
 }) {
-  const { show, hide } = useBusy();
   const [filter, setFilter] = useState<Filter>("all");
   const cacheKey = libraryCacheKey({
     albumId,
@@ -45,6 +46,12 @@ export function AlbumView({
     filter: albumId ? filter : undefined,
   });
   const cached = cacheGet<MediaListResponse>(cacheKey);
+
+  useScrollMemory(
+    albumId
+      ? `album:${albumId}:${filter}`
+      : `lib:${library?.type ?? "all"}:${library?.collection ?? "all"}`,
+  );
 
   const [album, setAlbum] = useState<Album | null>(
     cached?.album ?? (library ? { id: "library", name: library.title } : null),
@@ -60,8 +67,8 @@ export function AlbumView({
   const [refreshing, setRefreshing] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [downloading, setDownloading] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
+  const { download, downloading, popup } = useDownloadFlow();
 
   const load = useCallback(
     async (
@@ -96,19 +103,15 @@ export function AlbumView({
         setTotal(data.total);
         if (!append) cacheSet(cacheKey, data);
         else cacheMediaList(data.items, albumId);
-        if (library?.type === "image" || library?.type === "video") {
-          void prefetchLibrary();
-        }
-        hide();
       } catch (err) {
-        hide();
         setError(userMessage(err));
       }
     },
-    [albumId, cacheKey, filter, hide, library?.collection, library?.title, library?.type],
+    [albumId, cacheKey, filter, library?.collection, library?.title, library?.type],
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    setSelected(new Set());
     const existing = cacheGet<MediaListResponse>(cacheKey);
     if (existing) {
       setAlbum(
@@ -121,25 +124,21 @@ export function AlbumView({
       setNextPageToken(existing.nextPageToken);
       setTotal(existing.total);
       setLoading(false);
-      hide();
+      if (cacheIsFresh(cacheKey)) return;
     } else {
       setLoading(true);
       setItems([]);
-      show(library?.title ? `Memuat ${library.title}` : "Memuat album");
     }
-    setSelected(new Set());
     void load({}).finally(() => setLoading(false));
-  }, [cacheKey, hide, library?.title, load, show]);
+  }, [cacheKey, library?.title, load]);
 
   async function refresh() {
     setRefreshing(true);
-    show("Memuat ulang");
     await load({ fresh: true });
     setRefreshing(false);
   }
 
   async function logout() {
-    show("Keluar");
     cacheClear();
     await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     window.location.replace("/login");
@@ -148,7 +147,6 @@ export function AlbumView({
   async function loadMore() {
     if (!nextPageToken || loadingMore) return;
     setLoadingMore(true);
-    show("Memuat lainnya");
     await load({ pageToken: nextPageToken, append: true });
     setLoadingMore(false);
   }
@@ -164,19 +162,11 @@ export function AlbumView({
 
   async function downloadSelected() {
     const chosen = items.filter((item) => selected.has(item.id));
-    if (chosen.length === 0) return;
-    setDownloading(true);
-    show("Mengunduh");
-    try {
-      for (const item of chosen) {
-        await downloadMedia(item);
-        await sleep(700);
-      }
+    if (chosen.length === 0 || downloading) return;
+    const result = await download(chosen);
+    if (result === "success") {
       setSelectMode(false);
       setSelected(new Set());
-    } finally {
-      hide();
-      setDownloading(false);
     }
   }
 
@@ -277,7 +267,7 @@ export function AlbumView({
             onRetry={() => void load({ fresh: true })}
           />
         ) : loading && items.length === 0 ? (
-          <LoadingPanel label="Memuat kenangan" />
+          <MediaSkeleton />
         ) : items.length === 0 ? (
           <EmptyState
             message={
@@ -291,7 +281,7 @@ export function AlbumView({
         ) : (
           <>
             <ul className="grid grid-cols-3 gap-px bg-black sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
-              {items.map((item) => {
+              {items.map((item, index) => {
                 const isSelected = selected.has(item.id);
                 const duration =
                   item.type === "video" && item.durationMs
@@ -302,6 +292,7 @@ export function AlbumView({
                     <ThumbImage
                       src={item.thumbnailUrl}
                       alt={item.name}
+                      eager={index < 12}
                       className="h-full w-full object-cover"
                     />
                     {item.type === "video" ? (
@@ -350,6 +341,8 @@ export function AlbumView({
                               : `/m/${item.id}`
                         }
                         label="Membuka kenangan"
+                        onPointerDown={() => warmMedia(item)}
+                        onPointerEnter={() => warmMedia(item)}
                         className="absolute inset-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
                       >
                         {inner}
@@ -391,13 +384,15 @@ export function AlbumView({
             disabled={selected.size === 0 || downloading}
             className="mx-auto flex min-h-12 w-full max-w-lg items-center justify-center gap-2 rounded-full bg-white text-[16px] font-semibold text-black hover:bg-white/90 disabled:opacity-40"
           >
-            {downloading ? <Spinner size="sm" tone="dark" /> : <IconDownload className="h-5 w-5" />}
-            {downloading ? "Mengunduh" : `Download (${selected.size})`}
+            <IconDownload className="h-5 w-5" />
+            Download ({selected.size})
           </button>
         </div>
       ) : showDock ? (
         <BottomDock />
       ) : null}
+
+      {popup}
     </div>
   );
 }

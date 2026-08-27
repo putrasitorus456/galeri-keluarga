@@ -124,11 +124,14 @@ export function BottomDock() {
               onPointerEnter={() => {
                 if (tab.id === "foto" || tab.id === "video") void prefetchLibrary();
               }}
+              onPointerDown={() => {
+                if (tab.id === "foto" || tab.id === "video") void prefetchLibrary();
+              }}
               aria-current={isActive ? "page" : undefined}
-              className={`glass-tab pointer-events-auto flex h-12 flex-1 items-center justify-center rounded-full text-[15px] font-medium tracking-tight transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${
+              className={`glass-tab pointer-events-auto flex h-12 flex-1 items-center justify-center rounded-full text-[15px] font-semibold tracking-tight transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${
                 isActive
-                  ? "glass-tab-active text-white"
-                  : "text-white/70 hover:text-white"
+                  ? "glass-tab-active text-black"
+                  : "text-white hover:bg-white/10"
               }`}
             >
               {tab.label}

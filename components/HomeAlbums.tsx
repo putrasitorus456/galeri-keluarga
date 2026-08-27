@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { apiFetch, userMessage } from "@/lib/api-client";
 import {
   collageThumbnails,
@@ -13,10 +13,12 @@ import {
   CACHE_ALBUMS,
   cacheClear,
   cacheGet,
+  cacheIsFresh,
   cacheSet,
   cachedAlbums,
-  prefetchLibrary,
+  prefetchLibraryView,
 } from "@/lib/gallery-cache";
+import { useScrollMemory } from "@/lib/use-scroll-memory";
 import type { Album, AlbumsResponse } from "@/lib/types";
 import { AlbumCoverCard, CollageCard } from "@/components/AlbumCoverCard";
 import { AppHeader } from "@/components/AppHeader";
@@ -32,8 +34,8 @@ import {
   IconSearch,
   IconVideo,
 } from "@/components/Icons";
-import { BusyLink, LoadingPanel, useBusy } from "@/components/Loading";
-import { EmptyState, ErrorState } from "@/components/States";
+import { BusyLink } from "@/components/Loading";
+import { AlbumSkeleton, EmptyState, ErrorState } from "@/components/States";
 
 function SectionTitle({
   title,
@@ -83,6 +85,11 @@ function MediaTypeRow({
     <BusyLink
       href={href}
       label={`Membuka ${label}`}
+      onPointerDown={() => {
+        if (href === "/tipe/foto") void prefetchLibraryView({ type: "image" });
+        if (href === "/tipe/video") void prefetchLibraryView({ type: "video" });
+        if (href === "/tipe/gif") void prefetchLibraryView({ type: "gif" });
+      }}
       className="flex min-h-[3.35rem] items-center gap-3 px-4 text-white focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
     >
       <span className="flex h-8 w-8 shrink-0 items-center justify-center text-white">
@@ -108,35 +115,50 @@ export function HomeAlbums({
 }: {
   mode?: "home" | "all";
 }) {
-  const { show, hide } = useBusy();
   const [albums, setAlbums] = useState<Album[] | null>(() => cachedAlbums() ?? null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const isAll = mode === "all";
+  useScrollMemory(isAll ? "albums-all" : "home");
 
   const load = useCallback(async (fresh = false) => {
     if (!fresh) {
       const cached = cacheGet<AlbumsResponse>(CACHE_ALBUMS);
-      if (cached) {
-        setAlbums(cached.albums);
-        hide();
-      }
+      if (cached) setAlbums(cached.albums);
+      const detailed = cached?.albums.every(
+        (album) => typeof album.itemCount === "number" || !album.thumbnailUrl,
+      );
+      if (cached && cacheIsFresh(CACHE_ALBUMS) && detailed) return;
     }
     setError(null);
     try {
+      if (fresh || !cacheGet(CACHE_ALBUMS)) {
+        const lite = await apiFetch<AlbumsResponse>("/api/albums");
+        if (!cacheGet(CACHE_ALBUMS) || fresh) {
+          cacheSet(CACHE_ALBUMS, lite);
+          setAlbums(lite.albums);
+        }
+        const complete = lite.albums.every(
+          (album) => typeof album.itemCount === "number" || !album.thumbnailUrl,
+        );
+        if (complete && !fresh) return;
+      }
       const data = await apiFetch<AlbumsResponse>(
-        `/api/albums${fresh ? "?fresh=1" : ""}`,
+        `/api/albums?details=1${fresh ? "&fresh=1" : ""}`,
       );
       cacheSet(CACHE_ALBUMS, data);
       setAlbums(data.albums);
-      hide();
-      void prefetchLibrary();
     } catch (err) {
-      hide();
       if (!cacheGet(CACHE_ALBUMS)) setError(userMessage(err));
     }
-  }, [hide]);
+  }, []);
+
+  useLayoutEffect(() => {
+    const cached = cacheGet<AlbumsResponse>(CACHE_ALBUMS);
+    if (cached) setAlbums(cached.albums);
+  }, []);
 
   useEffect(() => {
     void load(false);
@@ -144,20 +166,17 @@ export function HomeAlbums({
 
   async function refresh() {
     setRefreshing(true);
-    show("Memuat ulang album");
     await load(true);
     setRefreshing(false);
   }
 
   async function logout() {
-    show("Keluar");
     cacheClear();
     await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     window.location.replace("/login");
   }
 
   const needle = query.trim().toLowerCase();
-  const isAll = mode === "all";
   const searched = useMemo(() => {
     if (!albums) return [];
     if (!needle) return albums;
@@ -261,7 +280,7 @@ export function HomeAlbums({
         {error ? (
           <ErrorState message={error} onRetry={() => void load(true)} />
         ) : albums === null ? (
-          <LoadingPanel label="Memuat album" />
+          <AlbumSkeleton />
         ) : albums.length === 0 ? (
           <EmptyState message={MESSAGES.albumsEmpty} />
         ) : searched.length === 0 ? (

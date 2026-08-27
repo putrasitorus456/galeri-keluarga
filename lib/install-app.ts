@@ -81,18 +81,46 @@ export function getInstallGuide(): InstallGuide {
   return "desktop";
 }
 
-export async function promptNativeInstall() {
-  if (!deferred) return "unavailable" as const;
+export type InstallOutcome = "accepted" | "dismissed" | "unavailable" | "aborted" | "failed";
+
+function isAborted(signal?: AbortSignal) {
+  return Boolean(signal?.aborted);
+}
+
+export async function promptNativeInstall(
+  signal?: AbortSignal,
+): Promise<InstallOutcome> {
+  if (!deferred) return "unavailable";
+  if (isAborted(signal)) return "aborted";
+
   const event = deferred;
   deferred = null;
   publish();
-  await event.prompt();
-  const { outcome } = await event.userChoice;
-  if (outcome === "accepted") {
-    installed = true;
-    publish();
+
+  try {
+    await event.prompt();
+    if (isAborted(signal)) return "aborted";
+
+    const outcome = await new Promise<"accepted" | "dismissed" | "aborted">(
+      (resolve) => {
+        const onAbort = () => resolve("aborted");
+        signal?.addEventListener("abort", onAbort, { once: true });
+        void event.userChoice.then((choice) => {
+          signal?.removeEventListener("abort", onAbort);
+          resolve(choice.outcome);
+        });
+      },
+    );
+
+    if (outcome === "aborted") return "aborted";
+    if (outcome === "accepted") {
+      installed = true;
+      publish();
+    }
+    return outcome;
+  } catch {
+    return "failed";
   }
-  return outcome;
 }
 
 if (typeof window !== "undefined") {

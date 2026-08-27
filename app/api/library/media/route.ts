@@ -1,6 +1,6 @@
 import { getSession } from "@/lib/auth";
 import { getLibraryMedia } from "@/lib/drive";
-import { errorResponse, unauthorized } from "@/lib/http";
+import { cachedJson, errorResponse, unauthorized } from "@/lib/http";
 import type { LibraryKind } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -22,7 +22,7 @@ export async function GET(request: Request) {
 
   try {
     const result = await getLibraryMedia({ type, collection, fresh });
-    return Response.json(result);
+    return cachedJson(result, 30);
   } catch (err) {
     return errorResponse(err);
   }

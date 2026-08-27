@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { IconAddToHome, IconIosShare } from "@/components/Icons";
+import { useEffect, useRef, useState } from "react";
+import { IconAddToHome, IconCheck, IconIosShare } from "@/components/Icons";
+import { Spinner } from "@/components/Loading";
 import {
   getInstallGuide,
   promptNativeInstall,
@@ -97,11 +98,42 @@ function StepIcon({ kind }: { kind?: "share" | "menu" }) {
   );
 }
 
+type InstallPhase = "loading" | "success" | "error";
+
 export function InstallAppButton() {
   const { canPrompt, installed } = useInstallApp();
   const [open, setOpen] = useState(false);
   const [guide, setGuide] = useState<InstallGuide>("android");
   const [copied, setCopied] = useState(false);
+  const [phase, setPhase] = useState<InstallPhase | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const hideTimer = useRef(0);
+
+  function dismissPopup() {
+    window.clearTimeout(hideTimer.current);
+    abortRef.current = null;
+    setPhase(null);
+  }
+
+  function cancelInstall() {
+    abortRef.current?.abort();
+    dismissPopup();
+  }
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+      window.clearTimeout(hideTimer.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (phase === "loading" && installed) {
+      abortRef.current = null;
+      setPhase("success");
+      hideTimer.current = window.setTimeout(dismissPopup, 2000);
+    }
+  }, [installed, phase]);
 
   useEffect(() => {
     if (!open) return;
@@ -112,13 +144,36 @@ export function InstallAppButton() {
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
-  if (installed) return null;
+  if (installed && phase !== "success" && phase !== "loading") return null;
 
   const copy = GUIDES[guide];
 
   async function onClick() {
+    if (phase === "loading") return;
     if (canPrompt) {
-      await promptNativeInstall();
+      window.clearTimeout(hideTimer.current);
+      const controller = new AbortController();
+      abortRef.current = controller;
+      setPhase("loading");
+      const result = await promptNativeInstall(controller.signal);
+      if (abortRef.current !== controller) return;
+      if (result === "accepted") {
+        abortRef.current = null;
+        setPhase("success");
+        hideTimer.current = window.setTimeout(dismissPopup, 2000);
+        return;
+      }
+      if (result === "failed") {
+        abortRef.current = null;
+        setPhase("error");
+        return;
+      }
+      dismissPopup();
+      if (result === "unavailable") {
+        setGuide(getInstallGuide());
+        setCopied(false);
+        setOpen(true);
+      }
       return;
     }
     setGuide(getInstallGuide());
@@ -137,15 +192,18 @@ export function InstallAppButton() {
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => void onClick()}
-        aria-label="Tambahkan ke layar utama"
-        className="inline-flex h-9 shrink-0 items-center gap-1 mt-1 rounded-full bg-white/10 pl-2 pr-2.5 text-[13px] font-medium text-white hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-      >
-        <IconAddToHome className="h-4 w-4" />
-        Pasang
-      </button>
+      {installed ? null : (
+        <button
+          type="button"
+          onClick={() => void onClick()}
+          disabled={phase === "loading"}
+          aria-label="Tambahkan ke layar utama"
+          className="mt-1 inline-flex h-9 shrink-0 items-center gap-1 rounded-full bg-white/10 pl-2 pr-2.5 text-[13px] font-medium text-white hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:opacity-50"
+        >
+          <IconAddToHome className="h-4 w-4" />
+          Pasang
+        </button>
+      )}
 
       {open ? (
         <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby="install-guide-title">
@@ -189,6 +247,132 @@ export function InstallAppButton() {
           </div>
         </div>
       ) : null}
+
+      <InstallPopup
+        phase={phase}
+        onCancel={cancelInstall}
+        onDismiss={dismissPopup}
+      />
     </>
+  );
+}
+
+function InstallPopup({
+  phase,
+  onCancel,
+  onDismiss,
+}: {
+  phase: InstallPhase | null;
+  onCancel: () => void;
+  onDismiss: () => void;
+}) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (phase === "loading") cancelRef.current?.focus();
+  }, [phase]);
+
+  useEffect(() => {
+    if (!phase) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      if (phase === "loading") onCancel();
+      else onDismiss();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel, onDismiss, phase]);
+
+  useEffect(() => {
+    if (!phase) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [phase]);
+
+  if (!phase) return null;
+
+  const titleId = "install-popup-title";
+
+  return (
+    <div
+      className="popup-backdrop fixed inset-0 z-[90] flex items-center justify-center bg-black/60 px-6 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      aria-live="assertive"
+      onClick={phase === "loading" ? undefined : onDismiss}
+    >
+      <div
+        key={phase}
+        className="popup-card w-full max-w-[19.5rem] rounded-[1.6rem] bg-[#2c2c2e] px-5 pb-5 pt-7 text-center shadow-[0_18px_50px_rgba(0,0,0,0.45)]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        {phase === "loading" ? (
+          <>
+            <span className="relative mx-auto flex h-16 w-16 items-center justify-center">
+              <span className="absolute inset-0 rounded-full bg-white/8" />
+              <Spinner size="lg" />
+            </span>
+            <h2
+              id={titleId}
+              className="mt-5 text-[17px] font-semibold tracking-tight text-white"
+            >
+              Memasang aplikasi
+            </h2>
+            <p className="mt-1 text-[14px] text-muted">Mohon tunggu sebentar</p>
+            <div className="progress-indeterminate mt-4 rounded-full" />
+            <button
+              ref={cancelRef}
+              type="button"
+              onClick={onCancel}
+              className="mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-full bg-white/12 text-[16px] font-semibold text-white hover:bg-white/18 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+            >
+              Batalkan
+            </button>
+          </>
+        ) : null}
+
+        {phase === "success" ? (
+          <>
+            <span className="popup-check mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-white text-black">
+              <IconCheck className="h-8 w-8" />
+            </span>
+            <h2
+              id={titleId}
+              className="mt-5 text-[17px] font-semibold tracking-tight text-white"
+            >
+              Aplikasi terpasang
+            </h2>
+            <p className="mt-1 text-[14px] text-muted">
+              Siap dibuka dari layar utama
+            </p>
+          </>
+        ) : null}
+
+        {phase === "error" ? (
+          <>
+            <h2
+              id={titleId}
+              className="text-[17px] font-semibold tracking-tight text-white"
+            >
+              Gagal memasang
+            </h2>
+            <p className="mt-2 text-[15px] leading-relaxed text-muted">
+              Aplikasi tidak dapat dipasang sekarang. Coba lagi nanti.
+            </p>
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-full bg-white text-[16px] font-semibold text-black hover:bg-white/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+            >
+              Tutup
+            </button>
+          </>
+        ) : null}
+      </div>
+    </div>
   );
 }

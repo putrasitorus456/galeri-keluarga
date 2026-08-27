@@ -10,7 +10,7 @@ import { getFileStream } from "@/lib/drive";
 import { AppError, MESSAGES } from "@/lib/errors";
 
 // Bump when the ffmpeg arguments change so stale cached files are ignored.
-const CACHE_VERSION = "v1";
+const CACHE_VERSION = "v2";
 const MAX_SOURCE_BYTES = envMb("VIDEO_TRANSCODE_MAX_MB", 512);
 const CACHE_BUDGET_BYTES = envMb("VIDEO_CACHE_MAX_MB", 2048);
 const TRANSCODE_TIMEOUT_MS = 10 * 60 * 1000;
@@ -126,7 +126,8 @@ async function buildArgs(source: string, target: string) {
   if (copyVideo) {
     args.push("-c:v", "copy");
   } else {
-    if (tonemap) args.push("-vf", TONEMAP_CHAIN);
+    const scale = "scale='min(1280,iw)':-2";
+    args.push("-vf", tonemap ? `${TONEMAP_CHAIN},${scale}` : scale);
     args.push(
       "-c:v", "libx264",
       "-preset", "veryfast",

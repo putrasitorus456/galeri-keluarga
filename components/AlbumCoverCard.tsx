@@ -3,6 +3,7 @@
 import { albumCoverClass } from "@/components/BrandMark";
 import { IconPhoto } from "@/components/Icons";
 import { BusyLink, ThumbImage } from "@/components/Loading";
+import { prefetchAlbum, prefetchLibraryView } from "@/lib/gallery-cache";
 import type { Album } from "@/lib/types";
 
 function CoverFallback({ albumId }: { albumId: string }) {
@@ -26,6 +27,8 @@ export function AlbumCoverCard({
     <BusyLink
       href={`/album/${album.id}`}
       label="Membuka album"
+      onPointerDown={() => void prefetchAlbum(album.id)}
+      onPointerEnter={() => void prefetchAlbum(album.id)}
       className="group flex flex-col items-center focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
     >
       <span className="relative aspect-square w-full overflow-hidden rounded-[1.15rem] bg-paper-deep">
@@ -40,11 +43,16 @@ export function AlbumCoverCard({
           <CoverFallback albumId={album.id} />
         )}
       </span>
-      <span className="mt-2 w-full truncate text-center text-[13px] font-medium leading-tight text-white">
+      <span
+        title={album.name}
+        className="mt-2 line-clamp-2 min-h-[2.1rem] w-full text-center text-[13px] font-medium leading-snug break-words text-white"
+      >
         {album.name}
       </span>
       <span className="mt-0.5 w-full truncate text-center text-[12px] leading-tight text-muted">
-        {(album.itemCount ?? 0).toLocaleString("id-ID")}
+        {typeof album.itemCount === "number"
+          ? album.itemCount.toLocaleString("id-ID")
+          : "\u00a0"}
       </span>
     </BusyLink>
   );
@@ -67,6 +75,16 @@ export function CollageCard({
     <BusyLink
       href={href}
       label={`Membuka ${title}`}
+      onPointerDown={() => {
+        if (href.startsWith("/tipe/")) {
+          const kind = href.split("/")[2];
+          const type =
+            kind === "foto" ? "image" : kind === "video" ? "video" : kind === "gif" ? "gif" : undefined;
+          void prefetchLibraryView({ type });
+        } else if (href.startsWith("/koleksi/")) {
+          void prefetchLibraryView({ collection: href.split("/")[2] });
+        }
+      }}
       className="group flex flex-col items-center focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
     >
       <span className="aspect-square w-full overflow-hidden rounded-[1.15rem] bg-paper-deep">
@@ -84,11 +102,14 @@ export function CollageCard({
           ))}
         </span>
       </span>
-      <span className="mt-2 w-full truncate text-center text-[13px] font-medium leading-tight text-white">
+      <span
+        title={title}
+        className="mt-2 line-clamp-2 min-h-[2.1rem] w-full text-center text-[13px] font-medium leading-snug break-words text-white"
+      >
         {title}
       </span>
       <span className="mt-0.5 w-full truncate text-center text-[12px] leading-tight text-muted">
-        {(count ?? 0).toLocaleString("id-ID")}
+        {typeof count === "number" ? count.toLocaleString("id-ID") : "\u00a0"}
       </span>
     </BusyLink>
   );

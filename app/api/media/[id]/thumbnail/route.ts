@@ -6,8 +6,16 @@ import { driveThumbnailUrl, enlargeThumbnailLink } from "@/lib/heic";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const THUMB_SIZE = 800;
+const MIN_THUMB_SIZE = 100;
+const MAX_THUMB_SIZE = 2048;
+const DEFAULT_THUMB_SIZE = 400;
 const CACHE_HEADER = "private, max-age=86400, stale-while-revalidate=604800";
+
+function requestedSize(request: Request) {
+  const raw = Number(new URL(request.url).searchParams.get("s"));
+  if (!Number.isFinite(raw)) return DEFAULT_THUMB_SIZE;
+  return Math.min(MAX_THUMB_SIZE, Math.max(MIN_THUMB_SIZE, Math.round(raw)));
+}
 
 const PLACEHOLDER_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
   <rect width="400" height="400" fill="#1c1c1e"/>
@@ -41,29 +49,30 @@ async function fetchThumb(url: string, token: string) {
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
   const session = await getSession();
   if (!session) return unauthorized();
 
   const { id } = await context.params;
+  const size = requestedSize(request);
 
   try {
     const token = await getAccessToken();
     const remembered = peekThumbnailLink(id);
     const fromMemory = remembered
-      ? await fetchThumb(enlargeThumbnailLink(remembered, THUMB_SIZE), token)
+      ? await fetchThumb(enlargeThumbnailLink(remembered, size), token)
       : null;
     if (fromMemory) return fromMemory;
 
-    const direct = await fetchThumb(driveThumbnailUrl(id, THUMB_SIZE), token);
+    const direct = await fetchThumb(driveThumbnailUrl(id, size), token);
     if (direct) return direct;
 
     const source = await getThumbnailSource(id);
     if (source.thumbnailLink) {
       const fromMeta = await fetchThumb(
-        enlargeThumbnailLink(source.thumbnailLink, THUMB_SIZE),
+        enlargeThumbnailLink(source.thumbnailLink, size),
         token,
       );
       if (fromMeta) return fromMeta;

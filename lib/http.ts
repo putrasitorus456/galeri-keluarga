@@ -25,3 +25,11 @@ export function unauthorized() {
     { status: 401 },
   );
 }
+
+export function cachedJson(data: unknown, maxAge = 20) {
+  return NextResponse.json(data, {
+    headers: {
+      "Cache-Control": `private, max-age=${maxAge}, stale-while-revalidate=600`,
+    },
+  });
+}

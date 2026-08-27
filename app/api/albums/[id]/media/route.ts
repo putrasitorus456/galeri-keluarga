@@ -1,6 +1,6 @@
 import { getSession } from "@/lib/auth";
 import { getAlbumWithMedia } from "@/lib/drive";
-import { errorResponse, unauthorized } from "@/lib/http";
+import { cachedJson, errorResponse, unauthorized } from "@/lib/http";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,7 +22,7 @@ export async function GET(
 
   try {
     const result = await getAlbumWithMedia(id, pageToken, typeFilter, fresh);
-    return Response.json(result);
+    return cachedJson(result, 20);
   } catch (err) {
     return errorResponse(err);
   }

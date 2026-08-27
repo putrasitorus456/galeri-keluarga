@@ -9,7 +9,6 @@ import {
 } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { getCachedMedia } from "@/lib/gallery-cache";
 
 type BusyContextValue = {
   busy: string | null;
@@ -32,9 +31,14 @@ export function useBusy() {
 }
 
 export function BusyProvider({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   const [busy, setBusy] = useState<string | null>(null);
   const show = useCallback((label: string) => setBusy(label), []);
   const hide = useCallback(() => setBusy(null), []);
+
+  useEffect(() => {
+    setBusy(null);
+  }, [pathname]);
 
   useEffect(() => {
     if (!busy) return;
@@ -121,11 +125,6 @@ export function LoadingPanel({ label }: { label: string }) {
   );
 }
 
-function hasInstantMediaView(path: string) {
-  const mediaId = path.match(/^\/(?:album|koleksi|tipe)\/[^/]+\/([^/]+)$/)?.[1];
-  return Boolean(mediaId && getCachedMedia(mediaId));
-}
-
 function BusyOverlay({ label }: { label: string }) {
   return (
     <div
@@ -145,11 +144,11 @@ function BusyOverlay({ label }: { label: string }) {
 
 export function BusyLink({
   href,
-  label = "Memuat",
   className,
   children,
   onClick,
   onPointerEnter,
+  onPointerDown,
   prefetch,
   "aria-label": ariaLabel,
   "aria-current": ariaCurrent,
@@ -160,13 +159,11 @@ export function BusyLink({
   children: React.ReactNode;
   onClick?: React.MouseEventHandler<HTMLAnchorElement>;
   onPointerEnter?: React.PointerEventHandler<HTMLAnchorElement>;
+  onPointerDown?: React.PointerEventHandler<HTMLAnchorElement>;
   prefetch?: boolean;
   "aria-label"?: string;
   "aria-current"?: "page" | undefined;
 }) {
-  const { show } = useBusy();
-  const pathname = usePathname();
-
   return (
     <Link
       href={href}
@@ -175,13 +172,8 @@ export function BusyLink({
       aria-current={ariaCurrent}
       className={className}
       onPointerEnter={onPointerEnter}
-      onClick={(event) => {
-        onClick?.(event);
-        if (event.defaultPrevented) return;
-        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-        const path = href.split("?")[0];
-        if (path !== pathname && !hasInstantMediaView(path)) show(label);
-      }}
+      onPointerDown={onPointerDown}
+      onClick={onClick}
     >
       {children}
     </Link>
@@ -208,11 +200,7 @@ export function ThumbImage({
 
   return (
     <>
-      {loaded ? null : (
-        <span className="absolute inset-0 flex items-center justify-center bg-[#1c1c1e]">
-          <Spinner size="sm" />
-        </span>
-      )}
+      {loaded ? null : <span className="absolute inset-0 bg-[#1c1c1e]" />}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={src}
@@ -222,7 +210,7 @@ export function ThumbImage({
         decoding="async"
         onLoad={() => setLoaded(true)}
         onError={() => setLoaded(true)}
-        className={`${className ?? ""} ${loaded ? "opacity-100" : "opacity-0"} transition-opacity duration-300`}
+        className={`${className ?? ""} ${loaded ? "opacity-100" : "opacity-0"} transition-opacity duration-200`}
       />
     </>
   );

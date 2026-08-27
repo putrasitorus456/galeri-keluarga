@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch, userMessage } from "@/lib/api-client";
 import {
@@ -12,9 +12,9 @@ import {
   findCachedAlbumList,
   getCachedMedia,
   libraryCacheKey,
-  rememberPreview,
+  warmMedia,
 } from "@/lib/gallery-cache";
-import { downloadMedia, shareMedia } from "@/lib/share-download";
+import { shareMedia } from "@/lib/share-download";
 import type {
   LibraryKind,
   MediaItem,
@@ -23,13 +23,15 @@ import type {
 } from "@/lib/types";
 import { AppHeader } from "@/components/AppHeader";
 import { IconButton } from "@/components/Chrome";
+import { useDownloadFlow } from "@/components/DownloadPopup";
 import { IconChevron, IconDownload, IconShare } from "@/components/Icons";
 import { MediaFilmstrip } from "@/components/MediaFilmstrip";
 import { MediaStage } from "@/components/MediaStage";
-import { LoadingPanel, Spinner, useBusy } from "@/components/Loading";
+import { Spinner, useBusy } from "@/components/Loading";
 import { ErrorState } from "@/components/States";
 
 const SWIPE_PX = 56;
+const SLIDE_MS = 240;
 
 export type ViewerLibrary = {
   title: string;
@@ -63,7 +65,10 @@ export function MediaViewer({
 
   const [currentId, setCurrentId] = useState(mediaId);
   const [media, setMedia] = useState<MediaItem | null>(
-    () => getCachedMedia(mediaId)?.media ?? null,
+    () =>
+      getCachedMedia(mediaId)?.media ??
+      cachedList?.items.find((item) => item.id === mediaId) ??
+      null,
   );
   const [items, setItems] = useState<MediaItem[]>(cachedList?.items ?? []);
   const [albumName, setAlbumName] = useState(cachedAlbumList?.album?.name);
@@ -74,12 +79,12 @@ export function MediaViewer({
     cachedAlbumList?.nextPageToken,
   );
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"download" | "share" | null>(null);
+  const [busy, setBusy] = useState<"share" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const { download, downloading, popup } = useDownloadFlow();
   const [dragX, setDragX] = useState(0);
   const [slide, setSlide] = useState(0);
   const [animating, setAnimating] = useState(false);
-  const [jumped, setJumped] = useState(false);
   const loadingMore = useRef(false);
   const pendingTo = useRef<string | null>(null);
   const openedId = useRef(mediaId);
@@ -101,10 +106,9 @@ export function MediaViewer({
   const currentItem = (index >= 0 ? items[index] : undefined) ?? media;
 
   const commit = useCallback(
-    (id: string, mode: "slide" | "jump") => {
+    (id: string) => {
       pendingTo.current = null;
       setCurrentId(id);
-      setJumped(mode === "jump");
       setNotice(null);
       setDragX(0);
       setSlide(0);
@@ -117,7 +121,10 @@ export function MediaViewer({
   const startSlide = useCallback((direction: -1 | 1, id: string) => {
     pendingTo.current = id;
     setAnimating(true);
-    setSlide(direction);
+    window.requestAnimationFrame(() => {
+      setDragX(0);
+      setSlide(direction);
+    });
   }, []);
 
   const goTo = useCallback(
@@ -125,7 +132,7 @@ export function MediaViewer({
       if (!id || id === currentId) return;
       if (!animating && prevItem?.id === id) startSlide(-1, id);
       else if (!animating && nextItem?.id === id) startSlide(1, id);
-      else commit(id, "jump");
+      else commit(id);
     },
     [animating, commit, currentId, nextItem?.id, prevItem?.id, startSlide],
   );
@@ -135,13 +142,13 @@ export function MediaViewer({
     const timer = window.setTimeout(() => {
       const id = pendingTo.current;
       pendingTo.current = null;
-      if (id) commit(id, "slide");
+      if (id) commit(id);
       else {
         setAnimating(false);
         setSlide(0);
         setDragX(0);
       }
-    }, 290);
+    }, SLIDE_MS + 40);
     return () => window.clearTimeout(timer);
   }, [animating, commit]);
 
@@ -149,6 +156,20 @@ export function MediaViewer({
     openedId.current = mediaId;
     setCurrentId(mediaId);
   }, [mediaId]);
+
+  useLayoutEffect(() => {
+    const list =
+      (!library && albumId ? findCachedAlbumList(albumId, currentId) : undefined) ??
+      (libraryKey ? cacheGet<MediaListResponse>(libraryKey) : undefined);
+    if (list?.items.length) {
+      setItems(list.items);
+      if (list.album?.name) setAlbumName(list.album.name);
+    }
+    const hit = getCachedMedia(currentId);
+    const fromList = list?.items.find((item) => item.id === currentId);
+    const seed = hit?.media ?? fromList;
+    if (seed) setMedia(seed);
+  }, [albumId, currentId, library, libraryKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -210,18 +231,17 @@ export function MediaViewer({
     let cancelled = false;
     setError(null);
     const hit = getCachedMedia(currentId);
-    if (hit?.media) {
-      if (!isLibrary && hit.albumId && hit.albumId !== albumId) {
+    const fromList = items.find((item) => item.id === currentId);
+    const seed = hit?.media ?? fromList;
+    if (seed) {
+      if (!isLibrary && hit?.albumId && hit.albumId !== albumId) {
         router.replace(`/album/${hit.albumId}/${currentId}`);
         return;
       }
-      setMedia(hit.media);
-      hide();
+      setMedia(seed);
       return;
     }
 
-    setMedia(null);
-    show("Membuka kenangan");
     void apiFetch<MediaMetaResponse>(`/api/media/${currentId}`)
       .then((data) => {
         if (cancelled) return;
@@ -231,17 +251,15 @@ export function MediaViewer({
         }
         cacheMedia(data.media, data.albumId);
         setMedia(data.media);
-        hide();
       })
       .catch((err) => {
         if (cancelled) return;
-        hide();
         setError(userMessage(err));
       });
     return () => {
       cancelled = true;
     };
-  }, [albumId, currentId, hide, isLibrary, router, show]);
+  }, [albumId, currentId, isLibrary, items, router]);
 
   useEffect(() => {
     if (!media) return;
@@ -252,9 +270,9 @@ export function MediaViewer({
   }, [media]);
 
   useEffect(() => {
-    const neighbors = [items[index - 1], items[index + 1]];
+    const neighbors = [items[index], items[index - 1], items[index + 1]];
     for (const item of neighbors) {
-      if (item?.type === "image") void rememberPreview(item.id, item.previewUrl);
+      if (item) warmMedia(item);
     }
   }, [index, items]);
 
@@ -303,8 +321,10 @@ export function MediaViewer({
     }
     pendingTo.current = null;
     setAnimating(true);
-    setSlide(0);
-    setDragX(0);
+    window.requestAnimationFrame(() => {
+      setSlide(0);
+      setDragX(0);
+    });
   }
 
   function onPointerDown(event: React.PointerEvent<HTMLDivElement>) {
@@ -360,18 +380,9 @@ export function MediaViewer({
   }
 
   async function onDownload() {
-    if (!currentItem) return;
-    setBusy("download");
+    if (!currentItem || downloading || busy) return;
     setNotice(null);
-    show("Mengunduh");
-    try {
-      await downloadMedia(currentItem);
-    } catch {
-      setNotice("Foto/video ini tidak dapat dibuka.");
-    } finally {
-      hide();
-      setBusy(null);
-    }
+    await download([currentItem]);
   }
 
   async function onShare() {
@@ -412,20 +423,16 @@ export function MediaViewer({
           currentItem ? (
             <>
               <IconButton
-                label={busy === "download" ? "Mengunduh..." : "Download"}
+                label={downloading ? "Mengunduh..." : "Download"}
                 onClick={() => void onDownload()}
-                disabled={busy !== null}
+                disabled={busy !== null || downloading}
               >
-                {busy === "download" ? (
-                  <Spinner size="sm" />
-                ) : (
-                  <IconDownload className="h-5 w-5" />
-                )}
+                <IconDownload className="h-5 w-5" />
               </IconButton>
               <IconButton
                 label={busy === "share" ? "Membagikan..." : "Bagikan"}
                 onClick={() => void onShare()}
-                disabled={busy !== null}
+                disabled={busy !== null || downloading}
               >
                 {busy === "share" ? (
                   <Spinner size="sm" />
@@ -442,7 +449,9 @@ export function MediaViewer({
         {error ? (
           <ErrorState message={error} />
         ) : !currentItem ? (
-          <LoadingPanel label="Membuka kenangan" />
+          <div className="flex flex-1 items-center justify-center">
+            <Spinner size="lg" />
+          </div>
         ) : (
           <>
             <div
@@ -458,21 +467,18 @@ export function MediaViewer({
                   animating ? "media-track" : ""
                 }`}
                 style={{
-                  transform: `translateX(calc(-33.333% + ${-slide * 33.333}% + ${dragX}px))`,
+                  transform: `translate3d(calc(-33.333% + ${-slide * 33.333}% + ${dragX}px), 0, 0)`,
                 }}
               >
-                <div className="h-full w-1/3 px-1.5">
+                <div className="h-full w-1/3">
                   {prevItem ? (
                     <MediaStage key={prevItem.id} item={prevItem} active={false} />
                   ) : null}
                 </div>
-                <div
-                  key={currentItem.id}
-                  className={`h-full w-1/3 px-1.5 ${jumped ? "media-in" : ""}`}
-                >
-                  <MediaStage item={currentItem} active />
+                <div className="h-full w-1/3">
+                  <MediaStage key={currentItem.id} item={currentItem} active />
                 </div>
-                <div className="h-full w-1/3 px-1.5">
+                <div className="h-full w-1/3">
                   {nextItem ? (
                     <MediaStage key={nextItem.id} item={nextItem} active={false} />
                   ) : null}
@@ -515,6 +521,8 @@ export function MediaViewer({
           </>
         )}
       </main>
+
+      {popup}
     </div>
   );
 }

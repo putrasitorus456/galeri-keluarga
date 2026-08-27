@@ -1,7 +1,6 @@
 "use client";
 
 import { IconPhoto } from "@/components/Icons";
-import { useBusy } from "@/components/Loading";
 
 type EmptyStateProps = {
   message: string;
@@ -26,8 +25,6 @@ type ErrorStateProps = {
 };
 
 export function ErrorState({ message, onRetry }: ErrorStateProps) {
-  const { show } = useBusy();
-
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-5 px-6 py-20">
       <p className="max-w-sm text-center text-[16px] leading-relaxed text-white">
@@ -36,10 +33,7 @@ export function ErrorState({ message, onRetry }: ErrorStateProps) {
       {onRetry ? (
         <button
           type="button"
-          onClick={() => {
-            show("Mencoba lagi");
-            onRetry();
-          }}
+          onClick={onRetry}
           className="inline-flex min-h-11 items-center justify-center rounded-full bg-white px-7 text-[15px] font-semibold text-black hover:bg-white/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
         >
           Coba lagi

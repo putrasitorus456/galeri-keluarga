@@ -1,15 +1,23 @@
 "use client";
 
 import { apiFetch } from "@/lib/api-client";
-import type { AlbumsResponse, MediaItem, MediaListResponse, MediaMetaResponse } from "@/lib/types";
+import { browserNeedsVideoTranscode } from "@/lib/playback";
+import type {
+  AlbumsResponse,
+  MediaItem,
+  MediaListResponse,
+  MediaMetaResponse,
+} from "@/lib/types";
 
 type Entry = { at: number; data: unknown };
 
 const memory = new Map<string, Entry>();
 const TTL_MS = 5 * 60 * 1000;
 const MEDIA_PREFIX = "media:";
+const STORE_PREFIX = "gk-cache:";
 const MAX_PREVIEW_ITEMS = 24;
 const MAX_PREVIEW_BYTES = 80 * 1024 * 1024;
+const MAX_WARMED_VIDEOS = 4;
 
 type PreviewEntry = {
   objectUrl: string;
@@ -20,6 +28,8 @@ const previewMemory = new Map<string, PreviewEntry>();
 const previewPending = new Map<string, Promise<string>>();
 const openedIds = new Set<string>();
 const transcodedIds = new Set<string>();
+const warmedVideos = new Map<string, HTMLVideoElement>();
+const prefetching = new Set<string>();
 
 export const CACHE_ALBUMS = "albums";
 
@@ -37,20 +47,60 @@ function mediaKey(id: string) {
   return `${MEDIA_PREFIX}${id}`;
 }
 
+function shouldPersist(key: string) {
+  return (
+    key === CACHE_ALBUMS ||
+    key.startsWith("album:") ||
+    key.startsWith("library:")
+  );
+}
+
+function persist(key: string, entry: Entry) {
+  if (typeof sessionStorage === "undefined" || !shouldPersist(key)) return;
+  try {
+    sessionStorage.setItem(STORE_PREFIX + key, JSON.stringify(entry));
+  } catch {
+    /* quota — memory cache still works */
+  }
+}
+
+function readPersisted(key: string): Entry | undefined {
+  if (typeof sessionStorage === "undefined" || !shouldPersist(key)) {
+    return undefined;
+  }
+  try {
+    const raw = sessionStorage.getItem(STORE_PREFIX + key);
+    if (!raw) return undefined;
+    const entry = JSON.parse(raw) as Entry;
+    if (!entry || typeof entry !== "object" || !("data" in entry)) {
+      return undefined;
+    }
+    return entry;
+  } catch {
+    return undefined;
+  }
+}
+
 export function cacheGet<T>(key: string): T | undefined {
-  const entry = memory.get(key);
-  if (!entry) return undefined;
-  return entry.data as T;
+  const mem = memory.get(key);
+  if (mem) return mem.data as T;
+  const stored = readPersisted(key);
+  if (!stored) return undefined;
+  memory.set(key, stored);
+  indexMediaList(stored.data);
+  return stored.data as T;
 }
 
 export function cacheIsFresh(key: string) {
-  const entry = memory.get(key);
+  const entry = memory.get(key) ?? readPersisted(key);
   return Boolean(entry && Date.now() - entry.at < TTL_MS);
 }
 
 export function cacheSet<T>(key: string, data: T) {
-  memory.set(key, { at: Date.now(), data });
+  const entry = { at: Date.now(), data };
+  memory.set(key, entry);
   indexMediaList(data);
+  persist(key, entry);
 }
 
 export function cacheMedia(item: MediaItem, albumId?: string) {
@@ -158,40 +208,105 @@ export async function rememberPreview(id: string, src: string) {
   return job;
 }
 
+function evictWarmedVideos() {
+  while (warmedVideos.size > MAX_WARMED_VIDEOS) {
+    const oldest = warmedVideos.keys().next().value;
+    if (!oldest) break;
+    const el = warmedVideos.get(oldest);
+    if (el) {
+      el.removeAttribute("src");
+      el.load();
+    }
+    warmedVideos.delete(oldest);
+  }
+}
+
+export function warmMedia(item: MediaItem) {
+  if (item.type === "image") {
+    void rememberPreview(item.id, item.previewUrl);
+    return;
+  }
+  if (typeof document === "undefined") return;
+  if (warmedVideos.has(item.id)) return;
+
+  const converted =
+    videoNeedsTranscode(item.id) || browserNeedsVideoTranscode(item.mimeType);
+  const video = document.createElement("video");
+  video.preload = "auto";
+  video.muted = true;
+  video.playsInline = true;
+  video.setAttribute("src", converted ? `${item.previewUrl}?transcode=1` : item.previewUrl);
+  warmedVideos.set(item.id, video);
+  evictWarmedVideos();
+}
+
 export function cacheClear() {
   for (const id of previewMemory.keys()) revokePreview(id);
+  for (const video of warmedVideos.values()) {
+    video.removeAttribute("src");
+    video.load();
+  }
+  warmedVideos.clear();
   previewPending.clear();
   openedIds.clear();
   transcodedIds.clear();
+  prefetching.clear();
   memory.clear();
+  if (typeof sessionStorage !== "undefined") {
+    const keys: string[] = [];
+    for (let i = 0; i < sessionStorage.length; i += 1) {
+      const key = sessionStorage.key(i);
+      if (key?.startsWith(STORE_PREFIX)) keys.push(key);
+    }
+    for (const key of keys) sessionStorage.removeItem(key);
+  }
   if (typeof caches !== "undefined") {
     void caches.delete("gallery-media-files");
   }
 }
 
 export async function prefetchLibrary() {
-  const jobs = [
-    {
-      key: libraryCacheKey({ type: "image" }),
-      url: "/api/library/media?type=image",
-    },
-    {
-      key: libraryCacheKey({ type: "video" }),
-      url: "/api/library/media?type=video",
-    },
-  ];
+  await Promise.all([
+    prefetchLibraryView({ type: "image" }),
+    prefetchLibraryView({ type: "video" }),
+  ]);
+}
 
-  await Promise.all(
-    jobs.map(async (job) => {
-      if (cacheIsFresh(job.key)) return;
-      try {
-        const data = await apiFetch<MediaListResponse>(job.url);
-        cacheSet(job.key, data);
-      } catch {
-        /* prefetch should never block the UI */
-      }
-    }),
-  );
+export async function prefetchAlbum(albumId: string) {
+  const key = libraryCacheKey({ albumId, filter: "all" });
+  if (cacheGet(key) || prefetching.has(key)) return;
+  prefetching.add(key);
+  try {
+    const data = await apiFetch<MediaListResponse>(`/api/albums/${albumId}/media`);
+    cacheSet(key, data);
+  } catch {
+    /* hover prefetch is best-effort */
+  } finally {
+    prefetching.delete(key);
+  }
+}
+
+export async function prefetchLibraryView(opts: {
+  type?: string;
+  collection?: string;
+}) {
+  const key = libraryCacheKey(opts);
+  if (cacheGet(key) || prefetching.has(key)) return;
+  prefetching.add(key);
+  const params = new URLSearchParams();
+  if (opts.type) params.set("type", opts.type);
+  if (opts.collection) params.set("collection", opts.collection);
+  const query = params.toString();
+  try {
+    const data = await apiFetch<MediaListResponse>(
+      `/api/library/media${query ? `?${query}` : ""}`,
+    );
+    cacheSet(key, data);
+  } catch {
+    /* hover prefetch is best-effort */
+  } finally {
+    prefetching.delete(key);
+  }
 }
 
 export function findCachedAlbumList(albumId: string, mediaId?: string) {
@@ -233,4 +348,33 @@ export function appendCachedAlbumItems(
 
 export function cachedAlbums() {
   return cacheGet<AlbumsResponse>(CACHE_ALBUMS)?.albums;
+}
+
+export function hasCachedPath(path: string) {
+  if (path === "/" || path === "/albums") return Boolean(cachedAlbums());
+  const albumMedia = path.match(/^\/album\/([^/]+)(?:\/([^/]+))?$/);
+  if (albumMedia) {
+    const [, albumId, mediaId] = albumMedia;
+    if (mediaId) {
+      return Boolean(
+        getCachedMedia(mediaId) || findCachedAlbumList(albumId, mediaId),
+      );
+    }
+    return Boolean(cacheGet(libraryCacheKey({ albumId, filter: "all" })));
+  }
+  const tipe = path.match(/^\/tipe\/(foto|video|gif|terbaru)(?:\/([^/]+))?$/);
+  if (tipe) {
+    const [, kind, mediaId] = tipe;
+    if (mediaId) return Boolean(getCachedMedia(mediaId));
+    const type =
+      kind === "foto" ? "image" : kind === "video" ? "video" : kind === "gif" ? "gif" : undefined;
+    return Boolean(cacheGet(libraryCacheKey({ type })));
+  }
+  const koleksi = path.match(/^\/koleksi\/([^/]+)(?:\/([^/]+))?$/);
+  if (koleksi) {
+    const [, slug, mediaId] = koleksi;
+    if (mediaId) return Boolean(getCachedMedia(mediaId));
+    return Boolean(cacheGet(libraryCacheKey({ collection: slug })));
+  }
+  return false;
 }

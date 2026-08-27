@@ -4,6 +4,7 @@ import { google, type drive_v3 } from "googleapis";
 import { revalidateTag, unstable_cache } from "next/cache";
 import { AppError, MESSAGES } from "@/lib/errors";
 import { getCollectionDef, sortAlbumsByRecent } from "@/lib/collections";
+import { THUMB, thumbUrl } from "@/lib/media-url";
 import type { Album, LibraryKind, MediaItem, MediaType } from "@/lib/types";
 
 const FOLDER_MIME = "application/vnd.google-apps.folder";
@@ -28,14 +29,43 @@ const ALLOWED_VIDEO = new Set([
 ]);
 
 export const PAGE_SIZE = 50;
-const COUNT_PAGE_SIZE = 100;
-const COUNT_MAX_PAGES = 10;
+const COUNT_PAGE_SIZE = 1000;
+const COUNT_MAX_PAGES = 1;
+const COVER_PAGE_SIZE = 4;
+const SUMMARY_CONCURRENCY = 8;
 const LIBRARY_MAX_ITEMS = 2000;
-const META_TTL_MS = 60_000;
+const META_TTL_MS = 10 * 60 * 1000;
 
 let driveClient: drive_v3.Drive | null = null;
 const fileMetaCache = new Map<string, { at: number; data: drive_v3.Schema$File }>();
 const thumbnailLinkCache = new Map<string, string>();
+const knownAlbumIds = new Set<string>();
+
+function rememberAlbumId(id?: string | null) {
+  if (id) knownAlbumIds.add(id);
+}
+
+async function mapPool<T, R>(
+  items: T[],
+  limit: number,
+  mapper: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results = new Array<R>(items.length);
+  let next = 0;
+  async function worker() {
+    while (true) {
+      const index = next;
+      next += 1;
+      if (index >= items.length) return;
+      results[index] = await mapper(items[index], index);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => worker()),
+  );
+  return results;
+}
 
 export function isHeicMime(mime: string) {
   return (HEIC_IMAGE as readonly string[]).includes(mime);
@@ -129,7 +159,7 @@ async function getFileMetadata(fileId: string) {
     });
     fileMetaCache.set(fileId, { at: Date.now(), data });
     if (data.thumbnailLink) thumbnailLinkCache.set(fileId, data.thumbnailLink);
-    if (fileMetaCache.size > 400) {
+    if (fileMetaCache.size > 800) {
       const oldest = fileMetaCache.keys().next().value;
       if (oldest) fileMetaCache.delete(oldest);
     }
@@ -163,6 +193,7 @@ export async function assertAlbum(albumId: string) {
   if (!file.parents?.includes(rootId)) {
     throw new AppError("not_found", MESSAGES.notFound, 404);
   }
+  rememberAlbumId(file.id);
   return file;
 }
 
@@ -179,7 +210,10 @@ export async function assertMediaAccessible(fileId: string) {
   if (!parentId) {
     throw new AppError("not_found", MESSAGES.notFound, 404);
   }
-  await assertAlbum(parentId);
+  if (!knownAlbumIds.has(parentId)) {
+    await assertAlbum(parentId);
+  }
+  rememberAlbumId(parentId);
   return { file, type, albumId: parentId };
 }
 
@@ -215,12 +249,12 @@ function mimeQueryFor(typeFilter?: string) {
   return "(mimeType contains 'image/' or mimeType contains 'video/')";
 }
 
-function thumbUrl(id: string) {
-  return `/api/media/${id}/thumbnail?s=800`;
-}
-
-/** Ambil cover + jumlah media album dalam satu rangkaian request. */
-async function getAlbumSummary(albumId: string, typeFilter?: string) {
+/** Cover album. Mode lite hanya 4 file; mode full menghitung hingga 1000 item. */
+async function summarizeAlbum(
+  albumId: string,
+  mode: "lite" | "full",
+  typeFilter?: string,
+) {
   try {
     const drive = getDrive();
     const coverIds: string[] = [];
@@ -230,14 +264,16 @@ async function getAlbumSummary(albumId: string, typeFilter?: string) {
     let gifCount = 0;
     let newestTime: string | undefined;
     let pageToken: string | undefined;
+    const pageSize = mode === "lite" ? COVER_PAGE_SIZE : COUNT_PAGE_SIZE;
+    const maxPages = mode === "lite" ? 1 : COUNT_MAX_PAGES;
 
-    for (let page = 0; page < COUNT_MAX_PAGES; page += 1) {
+    for (let page = 0; page < maxPages; page += 1) {
       const { data }: { data: drive_v3.Schema$FileList } =
         await drive.files.list({
           q: `'${albumId}' in parents and trashed = false and ${mimeQueryFor(typeFilter)}`,
           fields: "nextPageToken, files(id, mimeType, modifiedTime, thumbnailLink)",
           orderBy: "modifiedTime desc",
-          pageSize: COUNT_PAGE_SIZE,
+          pageSize,
           pageToken,
           supportsAllDrives: true,
           includeItemsFromAllDrives: true,
@@ -264,13 +300,14 @@ async function getAlbumSummary(albumId: string, typeFilter?: string) {
       if (!pageToken) break;
     }
 
+    const exact = mode === "full" || !pageToken;
     return {
-      thumbnailUrl: coverIds[0] ? thumbUrl(coverIds[0]) : undefined,
-      thumbnailUrls: coverIds.map(thumbUrl),
-      itemCount: count,
-      imageCount,
-      videoCount,
-      gifCount,
+      thumbnailUrl: coverIds[0] ? thumbUrl(coverIds[0], THUMB.cover) : undefined,
+      thumbnailUrls: coverIds.map((id) => thumbUrl(id, THUMB.cover)),
+      itemCount: exact ? count : undefined,
+      imageCount: exact ? imageCount : undefined,
+      videoCount: exact ? videoCount : undefined,
+      gifCount: exact ? gifCount : undefined,
       modifiedTime: newestTime,
     };
   } catch {
@@ -296,8 +333,9 @@ function toMediaItem(file: drive_v3.Schema$File, type: MediaType): MediaItem {
     name: file.name!,
     type,
     mimeType: file.mimeType!,
-    thumbnailUrl: thumbUrl(id),
-    previewUrl: `/api/media/${id}/file`,
+    thumbnailUrl: thumbUrl(id, THUMB.grid),
+    previewUrl:
+      type === "image" ? thumbUrl(id, THUMB.view) : `/api/media/${id}/file`,
     downloadUrl: `/api/media/${id}/download`,
     durationMs: Number.isFinite(durationMs) ? durationMs : undefined,
     albumId: file.parents?.[0] ?? undefined,
@@ -305,7 +343,7 @@ function toMediaItem(file: drive_v3.Schema$File, type: MediaType): MediaItem {
   };
 }
 
-async function listAlbumsFromDrive(): Promise<Album[]> {
+async function listAlbumsFromDrive(mode: "lite" | "full"): Promise<Album[]> {
   try {
     const drive = getDrive();
     const rootId = getRootFolderId();
@@ -318,10 +356,9 @@ async function listAlbumsFromDrive(): Promise<Album[]> {
       includeItemsFromAllDrives: true,
     });
     const folders = (data.files ?? []).filter((file) => file.id && file.name);
-    const albums = await Promise.all(
-      folders.map(async (file) =>
-        toAlbum(file, await getAlbumSummary(file.id!)),
-      ),
+    for (const file of folders) rememberAlbumId(file.id);
+    const albums = await mapPool(folders, SUMMARY_CONCURRENCY, async (file) =>
+      toAlbum(file, await summarizeAlbum(file.id!, mode)),
     );
     return sortAlbumsByRecent(albums);
   } catch (err) {
@@ -329,14 +366,16 @@ async function listAlbumsFromDrive(): Promise<Album[]> {
   }
 }
 
-export async function getAlbums(fresh = false) {
+export async function getAlbums(fresh = false, opts: { details?: boolean } = {}) {
+  const details = Boolean(opts.details);
+  const load = () => listAlbumsFromDrive(details ? "full" : "lite");
   if (fresh) {
     revalidateTag("albums");
-    return listAlbumsFromDrive();
+    return load();
   }
-  return unstable_cache(listAlbumsFromDrive, ["albums-v4"], {
+  return unstable_cache(load, [details ? "albums-v6-full" : "albums-v6-lite"], {
     tags: ["albums"],
-    revalidate: 300,
+    revalidate: details ? 600 : 180,
   })();
 }
 
@@ -393,10 +432,12 @@ async function listAlbumFolders() {
     supportsAllDrives: true,
     includeItemsFromAllDrives: true,
   });
-  return (data.files ?? []).filter(
+  const folders = (data.files ?? []).filter(
     (file): file is drive_v3.Schema$File & { id: string; name: string } =>
       Boolean(file.id && file.name),
   );
+  for (const folder of folders) rememberAlbumId(folder.id);
+  return folders;
 }
 
 async function getAlbumFolders(fresh = false) {
@@ -486,9 +527,9 @@ export async function getLibraryMedia(opts: {
     return load();
   }
 
-  return unstable_cache(load, ["library-v2", typeKey, collectionKey], {
+  return unstable_cache(load, ["library-v3", typeKey, collectionKey], {
     tags: ["albums"],
-    revalidate: 300,
+    revalidate: 600,
   })();
 }
 
@@ -506,7 +547,8 @@ export async function getAlbumWithMedia(
     revalidateTag(tag);
   }
 
-  const load = () => listMediaFromDrive(albumId, pageToken, typeFilter);
+  const load = () =>
+    listMediaFromDrive(albumId, pageToken, typeFilter, { skipAssert: true });
 
   if (fresh || pageToken) {
     const listed = await load();
@@ -519,8 +561,8 @@ export async function getAlbumWithMedia(
 
   const listed = await unstable_cache(
     load,
-    ["media-v4", albumId, typeFilter ?? "all"],
-    { tags: [tag, "albums"], revalidate: 300 },
+    ["media-v5", albumId, typeFilter ?? "all"],
+    { tags: [tag, "albums"], revalidate: 600 },
   )();
 
   return {

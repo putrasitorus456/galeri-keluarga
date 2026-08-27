@@ -6,6 +6,8 @@ import { IconBackspace } from "@/components/Icons";
 import { Spinner, useBusy } from "@/components/Loading";
 import { MESSAGES } from "@/lib/errors";
 
+const PIN_LENGTH = 4;
+
 export function PinForm() {
   const searchParams = useSearchParams();
   const { show, hide } = useBusy();
@@ -16,7 +18,9 @@ export function PinForm() {
   function appendDigit(digit: string) {
     if (loading) return;
     setError(null);
-    setPin((current) => (current.length >= 8 ? current : current + digit));
+    setPin((current) =>
+      current.length >= PIN_LENGTH ? current : current + digit,
+    );
   }
 
   function backspace() {
@@ -26,7 +30,7 @@ export function PinForm() {
   }
 
   async function submit() {
-    if (!pin || loading) return;
+    if (pin.length !== PIN_LENGTH || loading) return;
     setLoading(true);
     setError(null);
     show("Memeriksa PIN");
@@ -59,70 +63,77 @@ export function PinForm() {
   }
 
   const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
-  const dots = Math.max(4, pin.length || 4);
+  const keyClass =
+    "inline-flex h-[min(3.5rem,11dvh)] min-h-12 items-center justify-center rounded-2xl bg-paper-deep text-[1.35rem] font-semibold text-white hover:bg-forest focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:opacity-40";
 
   return (
-    <div className="mx-auto flex min-h-dvh max-w-md flex-col bg-black px-6 pb-10 pt-16">
-      <p className="text-center text-[12px] font-medium uppercase tracking-[0.22em] text-muted">
-        Galeri pribadi
-      </p>
-      <h1 className="mt-3 text-center text-[2.4rem] font-semibold leading-none tracking-tight text-white">
-        Foto Keluarga
-      </h1>
-      <p className="mx-auto mt-4 max-w-xs text-center text-[15px] leading-relaxed text-muted">
-        Masukkan PIN untuk melihat kenangan bersama.
-      </p>
+    <div className="mx-auto flex min-h-dvh max-w-md flex-col bg-black px-5 pb-[max(0.9rem,env(safe-area-inset-bottom))] pt-[max(0.6rem,env(safe-area-inset-top))]">
+      <div className="shrink-0 pt-5">
+        <p className="text-center text-[11px] font-medium uppercase tracking-[0.2em] text-muted">
+          Galeri keluarga
+        </p>
+        <h1 className="mt-2 text-center text-[1.85rem] font-semibold leading-none tracking-tight text-white">
+          Album Momen
+        </h1>
+        <p className="mx-auto mt-2.5 max-w-[16.5rem] text-center text-[14px] leading-snug text-muted">
+          Kumpulan foto dan video kenangan spesial keluarga.
+        </p>
 
-      <div
-        className="mt-10 flex min-h-10 items-center justify-center gap-3"
-        aria-hidden="true"
-      >
-        {Array.from({ length: dots }).map((_, i) => (
-          <span
-            key={i}
-            className={`h-3 w-3 rounded-full transition-colors ${
-              i < pin.length ? "bg-white" : "bg-white/20"
-            }`}
-          />
-        ))}
+        <div
+          className="mt-6 flex items-center justify-center gap-3.5"
+          aria-hidden="true"
+        >
+          {Array.from({ length: PIN_LENGTH }).map((_, i) => (
+            <span
+              key={i}
+              className={`h-3 w-3 rounded-full transition-colors ${
+                i < pin.length ? "bg-white" : "bg-white/20"
+              }`}
+            />
+          ))}
+        </div>
+
+        <label className="sr-only" htmlFor="pin">
+          PIN 4 angka
+        </label>
+        <input
+          id="pin"
+          type="password"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          maxLength={PIN_LENGTH}
+          value={pin}
+          disabled={loading}
+          onChange={(e) => {
+            setError(null);
+            setPin(e.target.value.replace(/\D/g, "").slice(0, PIN_LENGTH));
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void submit();
+          }}
+          className="sr-only"
+        />
+
+        {error ? (
+          <p
+            className="mt-3 min-h-6 text-center text-[14px] font-medium text-danger"
+            role="alert"
+          >
+            {error}
+          </p>
+        ) : (
+          <p className="mt-3 min-h-6" />
+        )}
       </div>
 
-      <label className="sr-only" htmlFor="pin">
-        PIN
-      </label>
-      <input
-        id="pin"
-        type="password"
-        inputMode="numeric"
-        autoComplete="one-time-code"
-        value={pin}
-        disabled={loading}
-        onChange={(e) => {
-          setError(null);
-          setPin(e.target.value.replace(/\D/g, "").slice(0, 8));
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") void submit();
-        }}
-        className="sr-only"
-      />
-
-      {error ? (
-        <p className="mt-4 text-center text-[15px] font-medium text-danger" role="alert">
-          {error}
-        </p>
-      ) : (
-        <p className="mt-4 h-6" />
-      )}
-
-      <div className="mt-2 grid grid-cols-3 gap-2.5">
+      <div className="mx-auto grid w-full max-w-[19rem] flex-1 grid-cols-3 content-center gap-2 py-1">
         {keys.map((key) => (
           <button
             key={key}
             type="button"
             onClick={() => appendDigit(key)}
-            disabled={loading}
-            className="inline-flex min-h-16 items-center justify-center rounded-2xl bg-paper-deep text-2xl font-semibold text-white hover:bg-forest focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:opacity-40"
+            disabled={loading || pin.length >= PIN_LENGTH}
+            className={keyClass}
           >
             {key}
           </button>
@@ -131,27 +142,27 @@ export function PinForm() {
         <button
           type="button"
           onClick={() => appendDigit("0")}
-          disabled={loading}
-          className="inline-flex min-h-16 items-center justify-center rounded-2xl bg-paper-deep text-2xl font-semibold text-white hover:bg-forest focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:opacity-40"
+          disabled={loading || pin.length >= PIN_LENGTH}
+          className={keyClass}
         >
           0
         </button>
         <button
           type="button"
           onClick={backspace}
-          disabled={loading}
+          disabled={loading || pin.length === 0}
           aria-label="Hapus"
-          className="inline-flex min-h-16 items-center justify-center rounded-2xl bg-paper-deep text-white hover:bg-forest focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:opacity-40"
+          className={keyClass}
         >
-          <IconBackspace className="h-6 w-6" />
+          <IconBackspace className="h-5 w-5" />
         </button>
       </div>
 
       <button
         type="button"
         onClick={() => void submit()}
-        disabled={loading || pin.length === 0}
-        className="mt-8 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-white text-[16px] font-semibold text-black hover:bg-white/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:opacity-40"
+        disabled={loading || pin.length !== PIN_LENGTH}
+        className="mt-2 inline-flex min-h-12 w-full shrink-0 items-center justify-center gap-2 rounded-full bg-white text-[16px] font-semibold text-black hover:bg-white/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:opacity-40"
       >
         {loading ? <Spinner size="sm" tone="dark" /> : null}
         {loading ? "Memeriksa" : "Masuk"}
