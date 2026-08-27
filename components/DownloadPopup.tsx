@@ -86,7 +86,6 @@ export function useDownloadFlow() {
       if (items.length === 0) return "aborted";
       if (abortRef.current) return "aborted";
 
-      abortRef.current?.abort();
       window.clearTimeout(hideTimer.current);
 
       const controller = new AbortController();
@@ -193,9 +192,10 @@ function DownloadPopup({
 
   useEffect(() => {
     if (!state) return;
+    const current = state;
     function onKey(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
-      if (state.phase === "loading") onCancel();
+      if (current.phase === "loading") onCancel();
       else onDismiss();
     }
     window.addEventListener("keydown", onKey);

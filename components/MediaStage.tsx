@@ -88,7 +88,7 @@ function VideoStage({ item, active }: { item: MediaItem; active: boolean }) {
   useEffect(() => {
     setSource(initialVideoSource(item));
     setReady(!active || wasMediaOpened(item.id));
-  }, [active, item.id, item.mimeType, item.previewUrl]);
+  }, [active, item]);
 
   useEffect(() => {
     if (!active) videoRef.current?.pause();
