@@ -11,7 +11,15 @@ function isPublicPath(pathname: string) {
   if (pathname === "/manifest.webmanifest" || pathname === "/manifest.json") {
     return true;
   }
-  if (pathname === "/favicon.ico" || pathname === "/icon.png") return true;
+  if (
+    pathname === "/favicon.ico" ||
+    pathname === "/icon" ||
+    pathname === "/icon.png" ||
+    pathname === "/apple-icon" ||
+    pathname === "/apple-icon.png"
+  ) {
+    return true;
+  }
   if (pathname === "/api/auth/login") return true;
   return false;
 }
