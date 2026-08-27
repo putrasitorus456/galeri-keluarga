@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Foto Keluarga",
-    short_name: "Foto Keluarga",
+    name: "Album Kita",
+    short_name: "Album Kita",
     description: "Galeri foto dan video keluarga.",
     start_url: "/",
     display: "standalone",

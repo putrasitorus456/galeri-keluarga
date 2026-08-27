@@ -69,11 +69,18 @@ export function PinForm() {
   return (
     <div className="mx-auto flex min-h-dvh max-w-md flex-col bg-black px-5 pb-[max(0.9rem,env(safe-area-inset-bottom))] pt-[max(0.6rem,env(safe-area-inset-top))]">
       <div className="shrink-0 pt-5">
-        <p className="text-center text-[11px] font-medium uppercase tracking-[0.2em] text-muted">
+        <img
+          src="/icons/icon-192.png"
+          alt=""
+          width={72}
+          height={72}
+          className="mx-auto h-[4.5rem] w-[4.5rem] rounded-[1.15rem] object-cover"
+        />
+        <p className="mt-4 text-center text-[11px] font-medium uppercase tracking-[0.2em] text-muted">
           Galeri keluarga
         </p>
         <h1 className="mt-2 text-center text-[1.85rem] font-semibold leading-none tracking-tight text-white">
-          Album Momen
+          Album Kita
         </h1>
         <p className="mx-auto mt-2.5 max-w-[16.5rem] text-center text-[14px] leading-snug text-muted">
           Kumpulan foto dan video kenangan spesial keluarga.

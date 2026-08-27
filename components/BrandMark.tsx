@@ -9,17 +9,25 @@ export function BrandMark({
 }) {
   const title =
     size === "lg" ? "text-4xl sm:text-5xl" : size === "sm" ? "text-xl" : "text-2xl";
+  const icon = size === "lg" ? 80 : size === "sm" ? 40 : 56;
 
   return (
     <div
       className={`flex flex-col ${align === "center" ? "items-center" : "items-start"}`}
     >
+      <img
+        src="/icons/icon-192.png"
+        alt=""
+        width={icon}
+        height={icon}
+        className="rounded-[1.1rem] object-cover"
+      />
       <span
-        className={`font-semibold tracking-tight ${title} ${
+        className={`mt-3 font-semibold tracking-tight ${title} ${
           light ? "text-white" : "text-white"
         }`}
       >
-        Foto Keluarga
+        Album Kita
       </span>
     </div>
   );

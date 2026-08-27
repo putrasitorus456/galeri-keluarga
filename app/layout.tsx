@@ -8,7 +8,7 @@ const sans = Inter({
   variable: "--font-sans",
 });
 
-const APP_NAME = "Foto Keluarga";
+const APP_NAME = "Album Kita";
 const APP_DESCRIPTION = "Kenangan foto dan video keluarga, mudah dilihat dan diunduh.";
 
 export const metadata: Metadata = {

@@ -226,7 +226,7 @@ export function HomeAlbums({
   return (
     <div className="mx-auto flex min-h-dvh max-w-5xl flex-col bg-black">
       <AppHeader
-        title={isAll ? "Album lainnya" : "Album"}
+        title={isAll ? "Album lainnya" : "Album Kita"}
         large={!isAll}
         titleAction={!isAll ? <InstallAppButton /> : undefined}
         backHref={isAll ? "/" : undefined}

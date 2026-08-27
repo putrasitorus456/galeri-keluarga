@@ -26,7 +26,7 @@ const GUIDES: Record<
         text: "Gulir ke bawah, lalu ketuk Tambahkan ke Layar Utama.",
       },
       {
-        text: "Ketuk Tambah. Setelah itu buka dari ikon Foto Keluarga di layar HP.",
+        text: "Ketuk Tambah. Setelah itu buka dari ikon Album Kita di layar HP.",
       },
     ],
   },
@@ -38,7 +38,7 @@ const GUIDES: Record<
         text: "Salin tautan halaman ini, lalu buka Safari.",
       },
       {
-        text: "Tempel tautan di kolom alamat Safari dan buka Foto Keluarga.",
+        text: "Tempel tautan di kolom alamat Safari dan buka Album Kita.",
       },
       {
         icon: "share",
@@ -48,7 +48,7 @@ const GUIDES: Record<
   },
   android: {
     title: "Tambahkan ke layar utama",
-    body: "Agar Foto Keluarga bisa dibuka seperti aplikasi biasa.",
+    body: "Agar Album Kita bisa dibuka seperti aplikasi biasa.",
     steps: [
       {
         icon: "menu",
@@ -58,13 +58,13 @@ const GUIDES: Record<
         text: "Ketuk Instal aplikasi atau Tambahkan ke layar utama.",
       },
       {
-        text: "Konfirmasi, lalu buka dari ikon Foto Keluarga di layar HP.",
+        text: "Konfirmasi, lalu buka dari ikon Album Kita di layar HP.",
       },
     ],
   },
   desktop: {
     title: "Tambahkan ke HP",
-    body: "Buka tautan Foto Keluarga di Chrome Android atau Safari iPhone, lalu tambahkan ke layar utama.",
+    body: "Buka tautan Album Kita di Chrome Android atau Safari iPhone, lalu tambahkan ke layar utama.",
     steps: [
       {
         text: "Android: di Chrome, ketuk menu (tiga titik) lalu Instal aplikasi.",

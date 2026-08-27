@@ -1,4 +1,4 @@
-# Foto Keluarga
+# Album Kita
 
 PWA sederhana agar orang tua bisa melihat dan mengunduh foto/video dari Google Drive tanpa login akun Google.
 
