@@ -7,6 +7,7 @@ import { Spinner } from "@/components/Loading";
 import {
   getInstallGuide,
   promptNativeInstall,
+  refreshInstalled,
   useInstallApp,
   type InstallGuide,
 } from "@/lib/install-app";
@@ -110,7 +111,7 @@ function StepIcon({ kind }: { kind?: "share" | "menu" }) {
   );
 }
 
-type InstallPhase = "loading" | "success" | "error";
+type InstallPhase = "loading" | "success" | "error" | "already";
 
 export function InstallAppButton() {
   const { canPrompt, installed } = useInstallApp();
@@ -156,9 +157,20 @@ export function InstallAppButton() {
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
-  if (installed && phase !== "success" && phase !== "loading") return null;
+  if (installed && phase === null) return null;
 
   const copy = GUIDES[guide];
+
+  async function showFallback() {
+    if (await refreshInstalled()) {
+      window.clearTimeout(hideTimer.current);
+      setPhase("already");
+      return;
+    }
+    setGuide(getInstallGuide());
+    setCopied(false);
+    setOpen(true);
+  }
 
   async function onClick() {
     if (phase === "loading") return;
@@ -181,16 +193,10 @@ export function InstallAppButton() {
         return;
       }
       dismissPopup();
-      if (result === "unavailable") {
-        setGuide(getInstallGuide());
-        setCopied(false);
-        setOpen(true);
-      }
+      if (result === "unavailable") await showFallback();
       return;
     }
-    setGuide(getInstallGuide());
-    setCopied(false);
-    setOpen(true);
+    await showFallback();
   }
 
   async function copyLink() {
@@ -365,6 +371,30 @@ function InstallPopup({
             <p className="mt-1 text-[14px] text-muted">
               Siap dibuka dari layar utama
             </p>
+          </>
+        ) : null}
+
+        {phase === "already" ? (
+          <>
+            <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-white/12 text-white">
+              <IconCheck className="h-8 w-8" />
+            </span>
+            <h2
+              id={titleId}
+              className="mt-5 text-[17px] font-semibold tracking-tight text-white"
+            >
+              Aplikasi sudah terpasang
+            </h2>
+            <p className="mt-2 text-[15px] leading-relaxed text-muted">
+              Buka Album Kita dari ikonnya di layar utama HP.
+            </p>
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-full bg-white text-[16px] font-semibold text-black hover:bg-white/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+            >
+              Mengerti
+            </button>
           </>
         ) : null}
 

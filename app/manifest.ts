@@ -10,6 +10,15 @@ export default function manifest(): MetadataRoute.Manifest {
     orientation: "portrait",
     background_color: "#000000",
     theme_color: "#000000",
+    // Dipakai navigator.getInstalledRelatedApps() untuk mendeteksi apakah PWA ini
+    // sudah terpasang saat halaman dibuka dari browser biasa.
+    prefer_related_applications: false,
+    related_applications: [
+      {
+        platform: "webapp",
+        url: "/manifest.webmanifest",
+      },
+    ],
     icons: [
       {
         src: "/icons/icon-192.png",

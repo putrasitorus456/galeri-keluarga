@@ -7,7 +7,15 @@ export type BeforeInstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 };
 
+type RelatedApp = { platform?: string; url?: string; id?: string };
+
+type NavigatorWithRelatedApps = Navigator & {
+  getInstalledRelatedApps?: () => Promise<RelatedApp[]>;
+};
+
 export type InstallGuide = "ios-safari" | "ios-other" | "android" | "desktop";
+
+const INSTALLED_KEY = "album-kita.installed";
 
 type InstallSnapshot = {
   canPrompt: boolean;
@@ -39,24 +47,94 @@ function isStandalone() {
   );
 }
 
+function readStoredInstalled() {
+  try {
+    return window.localStorage.getItem(INSTALLED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function storeInstalled(value: boolean) {
+  try {
+    if (value) window.localStorage.setItem(INSTALLED_KEY, "1");
+    else window.localStorage.removeItem(INSTALLED_KEY);
+  } catch {
+    // Penyimpanan bisa diblokir browser, deteksi lain tetap jalan.
+  }
+}
+
+function markInstalled() {
+  storeInstalled(true);
+  if (installed) return;
+  installed = true;
+  publish();
+}
+
+async function hasInstalledRelatedApp() {
+  const nav = navigator as NavigatorWithRelatedApps;
+  if (typeof nav.getInstalledRelatedApps !== "function") return null;
+  try {
+    const apps = await nav.getInstalledRelatedApps();
+    return apps.some((app) => app.platform === "webapp");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Cek ulang status pemasangan. Di Android, halaman yang dibuka lewat browser
+ * tidak berjalan standalone dan `beforeinstallprompt` tidak muncul lagi setelah
+ * PWA terpasang, jadi status perlu dikonfirmasi lewat sumber lain.
+ */
+export async function refreshInstalled(): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  if (isStandalone()) {
+    markInstalled();
+    return true;
+  }
+  if (deferred) return false;
+
+  if (readStoredInstalled() || (await hasInstalledRelatedApp())) {
+    markInstalled();
+    return true;
+  }
+  return installed;
+}
+
 function bindInstallEvents() {
   if (bound || typeof window === "undefined") return;
   bound = true;
-  installed = isStandalone();
+  installed = isStandalone() || readStoredInstalled();
   snapshot = { canPrompt: Boolean(deferred), installed };
   listeners.forEach((listener) => listener());
 
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();
     deferred = event as BeforeInstallPromptEvent;
+    // Browser hanya menawarkan pemasangan kalau aplikasi belum terpasang.
+    if (!isStandalone()) {
+      installed = false;
+      storeInstalled(false);
+    }
     publish();
   });
 
   window.addEventListener("appinstalled", () => {
     deferred = null;
     installed = true;
+    storeInstalled(true);
     publish();
   });
+
+  function recheck() {
+    if (document.visibilityState !== "visible") return;
+    void refreshInstalled();
+  }
+
+  document.addEventListener("visibilitychange", recheck);
+  window.addEventListener("focus", recheck);
+  void refreshInstalled();
 }
 
 function subscribe(listener: () => void) {
@@ -115,6 +193,7 @@ export async function promptNativeInstall(
     if (outcome === "aborted") return "aborted";
     if (outcome === "accepted") {
       installed = true;
+      storeInstalled(true);
       publish();
     }
     return outcome;
