@@ -21,8 +21,24 @@ for (const [from, to] of sources) {
 }
 
 const icon192 = join(iconsDir, "icon-192.png");
-copyFileSync(icon192, join(root, "app", "icon.png"));
 copyFileSync(icon192, join(root, "app", "apple-icon.png"));
+
+function gallerySvg() {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" fill="#0c0c0e"/>
+  <rect x="5.5" y="7.5" width="21" height="17" rx="2.2" fill="#161618" stroke="#f2f2f4" stroke-width="2"/>
+  <circle cx="11.8" cy="13.2" r="1.85" fill="#f2f2f4"/>
+  <path d="M7 22.6 12.5 16.1 16.3 19.6 19.9 14.7 25 22.6Z" fill="#f2f2f4"/>
+</svg>`;
+}
+
+async function renderGallery(size) {
+  return sharp(Buffer.from(gallerySvg()))
+    .resize(size, size, { fit: "fill" })
+    .png()
+    .toBuffer();
+}
 
 function pngToIco(images) {
   const count = images.length;
@@ -53,17 +69,17 @@ function pngToIco(images) {
   return Buffer.concat([header, ...entries, ...payloads]);
 }
 
-const icoImages = [];
-for (const size of [16, 32, 48]) {
-  const buffer = await sharp(icon192)
-    .resize(size, size, { fit: "cover" })
-    .png()
-    .toBuffer();
-  icoImages.push({ width: size, height: size, buffer });
-}
+const favicon32 = await renderGallery(32);
+const favicon48 = await renderGallery(48);
+writeFileSync(join(iconsDir, "favicon-32.png"), favicon32);
+writeFileSync(join(root, "app", "icon.png"), favicon32);
 
-const favicon = pngToIco(icoImages);
+const favicon = pngToIco([
+  { width: 16, height: 16, buffer: await renderGallery(16) },
+  { width: 32, height: 32, buffer: favicon32 },
+  { width: 48, height: 48, buffer: favicon48 },
+]);
 writeFileSync(join(root, "app", "favicon.ico"), favicon);
 writeFileSync(join(root, "public", "favicon.ico"), favicon);
 
-console.log("Ikon dipasang ke public/icons, app/icon.png, app/apple-icon.png, dan favicon.ico");
+console.log("Foto dipakai untuk PWA; favicon website memakai ikon galeri gelap");
