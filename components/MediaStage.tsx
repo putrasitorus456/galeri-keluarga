@@ -8,7 +8,11 @@ import {
   videoNeedsTranscode,
   wasMediaOpened,
 } from "@/lib/gallery-cache";
-import { browserNeedsVideoTranscode } from "@/lib/playback";
+import {
+  browserNeedsVideoTranscode,
+  prepareTranscodedPreview,
+  transcodedFileUrl,
+} from "@/lib/playback";
 import type { MediaItem } from "@/lib/types";
 import { useDownloadFlow } from "@/components/DownloadPopup";
 import { IconDownload } from "@/components/Icons";
@@ -81,28 +85,92 @@ function initialVideoSource(item: MediaItem): VideoSource {
 function VideoStage({ item, active }: { item: MediaItem; active: boolean }) {
   const { download, downloading, popup } = useDownloadFlow();
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [source, setSource] = useState<VideoSource>(() => initialVideoSource(item));
+  const convertedErrors = useRef(0);
+  const [source, setSource] = useState<VideoSource>(() =>
+    active ? initialVideoSource(item) : "original",
+  );
   const [ready, setReady] = useState(() => !active || wasMediaOpened(item.id));
-  const showSpinner = useDelayedFlag(active && !ready);
+  const [convertedUrl, setConvertedUrl] = useState<string | null>(null);
+  const showSpinner = useDelayedFlag(
+    active && source !== "failed" && !ready,
+    source === "converted" ? 0 : 480,
+  );
 
   useEffect(() => {
-    setSource(initialVideoSource(item));
+    convertedErrors.current = 0;
+    setSource(active ? initialVideoSource(item) : "original");
     setReady(!active || wasMediaOpened(item.id));
-  }, [active, item]);
+    setConvertedUrl(null);
+  }, [active, item.id, item.mimeType, item.previewUrl]);
 
   useEffect(() => {
     if (!active) videoRef.current?.pause();
   }, [active]);
 
+  useEffect(() => {
+    if (!active || source !== "converted" || convertedUrl) return;
+
+    let cancelled = false;
+    setReady(false);
+
+    void prepareTranscodedPreview(item.previewUrl)
+      .then(() => {
+        if (cancelled) return;
+        setConvertedUrl(transcodedFileUrl(item.previewUrl));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSource("failed");
+        setReady(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [active, convertedUrl, item.previewUrl, source]);
+
+  function markReady() {
+    setReady(true);
+    markMediaOpened(item.id);
+  }
+
   function handleError() {
+    if (!active) return;
     if (source === "original") {
       markVideoNeedsTranscode(item.id);
+      convertedErrors.current = 0;
       setSource("converted");
+      setConvertedUrl(null);
+      setReady(false);
+      return;
+    }
+    if (convertedErrors.current < 2) {
+      convertedErrors.current += 1;
+      setConvertedUrl(null);
       setReady(false);
       return;
     }
     setSource("failed");
     setReady(true);
+  }
+
+  function retry() {
+    convertedErrors.current = 0;
+    setSource(initialVideoSource(item));
+    setConvertedUrl(null);
+    setReady(false);
+  }
+
+  if (!active) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={item.thumbnailUrl}
+        alt=""
+        draggable={false}
+        className="h-full w-full bg-black object-contain"
+      />
+    );
   }
 
   if (source === "failed") {
@@ -112,15 +180,24 @@ function VideoStage({ item, active }: { item: MediaItem; active: boolean }) {
           <p className="max-w-sm text-center text-[15px] font-medium tracking-tight text-white/90">
             Video ini tidak dapat diputar di perangkat Anda.
           </p>
-          <button
-            type="button"
-            onClick={() => void download([item], { transcoded: true })}
-            disabled={downloading}
-            className="inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-[15px] font-medium text-white backdrop-blur transition hover:bg-white/25 disabled:opacity-50"
-          >
-            <IconDownload className="h-4 w-4" />
-            Unduh video
-          </button>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={retry}
+              className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-[15px] font-medium text-black transition hover:bg-white/90"
+            >
+              Coba lagi
+            </button>
+            <button
+              type="button"
+              onClick={() => void download([item], { transcoded: true })}
+              disabled={downloading}
+              className="inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-[15px] font-medium text-white backdrop-blur transition hover:bg-white/25 disabled:opacity-50"
+            >
+              <IconDownload className="h-4 w-4" />
+              Unduh video
+            </button>
+          </div>
         </Overlay>
         {popup}
       </>
@@ -128,43 +205,46 @@ function VideoStage({ item, active }: { item: MediaItem; active: boolean }) {
   }
 
   const src =
-    source === "converted" ? `${item.previewUrl}?transcode=1` : item.previewUrl;
+    source === "converted" ? convertedUrl : active ? item.previewUrl : null;
 
   return (
     <>
-      {showSpinner ? (
+      {showSpinner || !src ? (
         <Overlay thumbnailUrl={item.thumbnailUrl}>
-          <Spinner size="lg" />
-          <StatusCopy
-            label={
-              source === "converted"
-                ? "Menyiapkan video"
-                : "Memuat pratinjau"
-            }
-          />
+          {active ? (
+            <>
+              <Spinner size="lg" />
+              <StatusCopy
+                label={
+                  source === "converted"
+                    ? "Menyiapkan video"
+                    : "Memuat pratinjau"
+                }
+              />
+            </>
+          ) : null}
         </Overlay>
       ) : null}
-      <video
-        key={source}
-        ref={videoRef}
-        controls={active}
-        playsInline
-        preload={active || wasMediaOpened(item.id) ? "auto" : "metadata"}
-        poster={item.thumbnailUrl}
-        className="h-full w-full bg-black object-contain"
-        src={src}
-        onCanPlay={() => {
-          setReady(true);
-          markMediaOpened(item.id);
-        }}
-        onLoadedData={() => {
-          setReady(true);
-          markMediaOpened(item.id);
-        }}
-        onError={handleError}
-      >
-        Browser Anda tidak dapat memutar video ini.
-      </video>
+      {src ? (
+        <video
+          key={src}
+          ref={videoRef}
+          controls={active && ready}
+          playsInline
+          preload="auto"
+          poster={item.thumbnailUrl}
+          className={`h-full w-full bg-black object-contain ${
+            ready ? "opacity-100" : "opacity-0"
+          }`}
+          src={src}
+          onCanPlay={markReady}
+          onLoadedData={markReady}
+          onError={handleError}
+        >
+          Browser Anda tidak dapat memutar video ini.
+        </video>
+      ) : null}
+      {popup}
     </>
   );
 }

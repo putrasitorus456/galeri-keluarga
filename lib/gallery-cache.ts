@@ -1,7 +1,6 @@
 "use client";
 
 import { apiFetch } from "@/lib/api-client";
-import { browserNeedsVideoTranscode } from "@/lib/playback";
 import type {
   AlbumsResponse,
   MediaItem,
@@ -17,7 +16,7 @@ const MEDIA_PREFIX = "media:";
 const STORE_PREFIX = "gk-cache:";
 const MAX_PREVIEW_ITEMS = 24;
 const MAX_PREVIEW_BYTES = 80 * 1024 * 1024;
-const MAX_WARMED_VIDEOS = 4;
+const TRANSCODE_STORE = "gk-transcode-ids";
 
 type PreviewEntry = {
   objectUrl: string;
@@ -27,11 +26,23 @@ type PreviewEntry = {
 const previewMemory = new Map<string, PreviewEntry>();
 const previewPending = new Map<string, Promise<string>>();
 const openedIds = new Set<string>();
-const transcodedIds = new Set<string>();
-const warmedVideos = new Map<string, HTMLVideoElement>();
 const prefetching = new Set<string>();
 
 export const CACHE_ALBUMS = "albums";
+
+function readTranscodedIds() {
+  if (typeof sessionStorage === "undefined") return new Set<string>();
+  try {
+    const raw = sessionStorage.getItem(TRANSCODE_STORE);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+    if (!Array.isArray(parsed)) return new Set<string>();
+    return new Set(parsed.filter((id): id is string => typeof id === "string"));
+  } catch {
+    return new Set<string>();
+  }
+}
+
+const transcodedIds = readTranscodedIds();
 
 export function libraryCacheKey(opts: {
   albumId?: string;
@@ -140,6 +151,11 @@ export function wasMediaOpened(id: string) {
 
 export function markVideoNeedsTranscode(id: string) {
   transcodedIds.add(id);
+  try {
+    sessionStorage.setItem(TRANSCODE_STORE, JSON.stringify([...transcodedIds]));
+  } catch {
+    /* quota — memory set still works */
+  }
 }
 
 export function videoNeedsTranscode(id: string) {
@@ -208,51 +224,21 @@ export async function rememberPreview(id: string, src: string) {
   return job;
 }
 
-function evictWarmedVideos() {
-  while (warmedVideos.size > MAX_WARMED_VIDEOS) {
-    const oldest = warmedVideos.keys().next().value;
-    if (!oldest) break;
-    const el = warmedVideos.get(oldest);
-    if (el) {
-      el.removeAttribute("src");
-      el.load();
-    }
-    warmedVideos.delete(oldest);
-  }
-}
-
 export function warmMedia(item: MediaItem) {
   if (item.type === "image") {
     void rememberPreview(item.id, item.previewUrl);
-    return;
   }
-  if (typeof document === "undefined") return;
-  if (warmedVideos.has(item.id)) return;
-
-  const converted =
-    videoNeedsTranscode(item.id) || browserNeedsVideoTranscode(item.mimeType);
-  const video = document.createElement("video");
-  video.preload = "auto";
-  video.muted = true;
-  video.playsInline = true;
-  video.setAttribute("src", converted ? `${item.previewUrl}?transcode=1` : item.previewUrl);
-  warmedVideos.set(item.id, video);
-  evictWarmedVideos();
 }
 
 export function cacheClear() {
   for (const id of previewMemory.keys()) revokePreview(id);
-  for (const video of warmedVideos.values()) {
-    video.removeAttribute("src");
-    video.load();
-  }
-  warmedVideos.clear();
   previewPending.clear();
   openedIds.clear();
   transcodedIds.clear();
   prefetching.clear();
   memory.clear();
   if (typeof sessionStorage !== "undefined") {
+    sessionStorage.removeItem(TRANSCODE_STORE);
     const keys: string[] = [];
     for (let i = 0; i < sessionStorage.length; i += 1) {
       const key = sessionStorage.key(i);

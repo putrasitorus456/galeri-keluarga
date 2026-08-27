@@ -19,7 +19,7 @@ const serwist = new Serwist({
     {
       matcher: ({ request, sameOrigin, url }) =>
         sameOrigin &&
-        /^\/api\/media\/[^/]+\/(file|thumbnail)\/?$/.test(url.pathname) &&
+        /^\/api\/media\/[^/]+\/thumbnail\/?$/.test(url.pathname) &&
         !request.headers.has("range"),
       handler: new CacheFirst({
         cacheName: "gallery-media-files",

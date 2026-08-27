@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { IconAddToHome, IconCheck, IconIosShare } from "@/components/Icons";
 import { Spinner } from "@/components/Loading";
 import {
@@ -9,6 +10,17 @@ import {
   useInstallApp,
   type InstallGuide,
 } from "@/lib/install-app";
+
+function ClientPortal({ children }: { children: React.ReactNode }) {
+  const [target, setTarget] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    setTarget(document.body);
+  }, []);
+
+  if (!target) return null;
+  return createPortal(children, target);
+}
 
 const GUIDES: Record<
   InstallGuide,
@@ -206,53 +218,57 @@ export function InstallAppButton() {
       )}
 
       {open ? (
-        <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby="install-guide-title">
-          <button
-            type="button"
-            className="absolute inset-0 bg-black/55"
-            aria-label="Tutup"
-            onClick={() => setOpen(false)}
-          />
-          <div className="absolute inset-x-4 bottom-[5.5rem] rounded-[1.5rem] bg-[#2c2c2e] p-5 shadow-[0_20px_50px_rgba(0,0,0,0.45)]">
-            <p id="install-guide-title" className="text-[18px] font-semibold text-white">
-              {copy.title}
-            </p>
-            <p className="mt-1 text-[15px] leading-relaxed text-muted">{copy.body}</p>
-            <ol className="mt-4 space-y-3">
-              {copy.steps.map((step) => (
-                <li key={step.text} className="flex items-start gap-3">
-                  <StepIcon kind={step.icon} />
-                  <p className="pt-1.5 text-[15px] leading-snug text-white">{step.text}</p>
-                </li>
-              ))}
-            </ol>
-            <div className={`mt-5 grid gap-3 ${guide === "ios-other" ? "grid-cols-2" : "grid-cols-1"}`}>
-              {guide === "ios-other" ? (
+        <ClientPortal>
+          <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby="install-guide-title">
+            <button
+              type="button"
+              className="absolute inset-0 bg-black/55"
+              aria-label="Tutup"
+              onClick={() => setOpen(false)}
+            />
+            <div className="absolute inset-x-4 bottom-[5.5rem] rounded-[1.5rem] bg-[#2c2c2e] p-5 shadow-[0_20px_50px_rgba(0,0,0,0.45)]">
+              <p id="install-guide-title" className="text-[18px] font-semibold text-white">
+                {copy.title}
+              </p>
+              <p className="mt-1 text-[15px] leading-relaxed text-muted">{copy.body}</p>
+              <ol className="mt-4 space-y-3">
+                {copy.steps.map((step) => (
+                  <li key={step.text} className="flex items-start gap-3">
+                    <StepIcon kind={step.icon} />
+                    <p className="pt-1.5 text-[15px] leading-snug text-white">{step.text}</p>
+                  </li>
+                ))}
+              </ol>
+              <div className={`mt-5 grid gap-3 ${guide === "ios-other" ? "grid-cols-2" : "grid-cols-1"}`}>
+                {guide === "ios-other" ? (
+                  <button
+                    type="button"
+                    onClick={() => void copyLink()}
+                    className="inline-flex min-h-11 items-center justify-center rounded-full bg-white text-[15px] font-semibold text-black hover:bg-white/90"
+                  >
+                    {copied ? "Tautan disalin" : "Salin tautan"}
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  onClick={() => void copyLink()}
-                  className="inline-flex min-h-11 items-center justify-center rounded-full bg-white text-[15px] font-semibold text-black hover:bg-white/90"
+                  onClick={() => setOpen(false)}
+                  className="inline-flex min-h-11 items-center justify-center rounded-full bg-white/10 text-[15px] font-semibold text-white"
                 >
-                  {copied ? "Tautan disalin" : "Salin tautan"}
+                  Mengerti
                 </button>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="inline-flex min-h-11 items-center justify-center rounded-full bg-white/10 text-[15px] font-semibold text-white"
-              >
-                Mengerti
-              </button>
+              </div>
             </div>
           </div>
-        </div>
+        </ClientPortal>
       ) : null}
 
-      <InstallPopup
-        phase={phase}
-        onCancel={cancelInstall}
-        onDismiss={dismissPopup}
-      />
+      <ClientPortal>
+        <InstallPopup
+          phase={phase}
+          onCancel={cancelInstall}
+          onDismiss={dismissPopup}
+        />
+      </ClientPortal>
     </>
   );
 }
@@ -298,7 +314,7 @@ function InstallPopup({
 
   return (
     <div
-      className="popup-backdrop fixed inset-0 z-[90] flex items-center justify-center bg-black/60 px-6 backdrop-blur-sm"
+      className="popup-backdrop fixed inset-0 z-[90] flex items-center justify-center overflow-y-auto bg-black/60 px-6 py-[max(1.5rem,env(safe-area-inset-top,0px))] backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
@@ -307,7 +323,7 @@ function InstallPopup({
     >
       <div
         key={phase}
-        className="popup-card w-full max-w-[19.5rem] rounded-[1.6rem] bg-[#2c2c2e] px-5 pb-5 pt-7 text-center shadow-[0_18px_50px_rgba(0,0,0,0.45)]"
+        className="popup-card my-auto w-full max-w-[19.5rem] shrink-0 rounded-[1.6rem] bg-[#2c2c2e] px-5 pb-5 pt-7 text-center shadow-[0_18px_50px_rgba(0,0,0,0.45)]"
         onClick={(event) => event.stopPropagation()}
       >
         {phase === "loading" ? (

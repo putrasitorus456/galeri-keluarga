@@ -10,11 +10,11 @@ import { getFileStream } from "@/lib/drive";
 import { AppError, MESSAGES } from "@/lib/errors";
 
 // Bump when the ffmpeg arguments change so stale cached files are ignored.
-const CACHE_VERSION = "v2";
+const CACHE_VERSION = "v3";
 const MAX_SOURCE_BYTES = envMb("VIDEO_TRANSCODE_MAX_MB", 512);
 const CACHE_BUDGET_BYTES = envMb("VIDEO_CACHE_MAX_MB", 2048);
 const TRANSCODE_TIMEOUT_MS = 10 * 60 * 1000;
-const MAX_CONCURRENT_TRANSCODES = 2;
+const MAX_CONCURRENT_TRANSCODES = 1;
 
 function envMb(name: string, fallbackMb: number) {
   const parsed = Number(process.env[name]);
@@ -126,14 +126,16 @@ async function buildArgs(source: string, target: string) {
   if (copyVideo) {
     args.push("-c:v", "copy");
   } else {
-    const scale = "scale='min(1280,iw)':-2";
+    // 720p / 30fps / ultrafast keeps first-open conversion usable on phones
+    // while still fitting typical Android H.264 decoders.
+    const scale = "scale='min(720,iw)':-2,fps=30";
     args.push("-vf", tonemap ? `${TONEMAP_CHAIN},${scale}` : scale);
     args.push(
       "-c:v", "libx264",
-      "-preset", "veryfast",
-      "-crf", "23",
-      "-profile:v", "high",
-      "-level", "4.1",
+      "-preset", "ultrafast",
+      "-crf", "24",
+      "-profile:v", "main",
+      "-level", "4.0",
       "-pix_fmt", "yuv420p",
     );
   }

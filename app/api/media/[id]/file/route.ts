@@ -77,11 +77,18 @@ async function streamMedia(request: Request, id: string) {
 
     const range = request.headers.get("range");
 
+    const mediaUrl = new URL(request.url);
     const wantsMp4 =
-      new URL(request.url).searchParams.get("transcode") === "1" &&
+      mediaUrl.searchParams.get("transcode") === "1" &&
       meta.mimeType.startsWith("video/");
     if (wantsMp4) {
       const playable = await getPlayableVideo(id, meta.size);
+      if (mediaUrl.searchParams.get("prepare") === "1") {
+        return Response.json(
+          { ready: true, size: playable.size },
+          { headers: { "Cache-Control": "no-store" } },
+        );
+      }
       return localFileResponse(playable.path, playable.size, range, {
         "Content-Type": "video/mp4",
         "Cache-Control": "private, max-age=3600",
