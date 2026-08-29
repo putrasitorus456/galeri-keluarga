@@ -324,6 +324,8 @@ export function appendCachedAlbumItems(
   ];
   const next: MediaListResponse = {
     album: page.album ?? existing?.album,
+    breadcrumb: page.breadcrumb ?? existing?.breadcrumb,
+    subAlbums: page.subAlbums ?? existing?.subAlbums,
     items: merged,
     nextPageToken: page.nextPageToken,
     total: page.total ?? existing?.total,

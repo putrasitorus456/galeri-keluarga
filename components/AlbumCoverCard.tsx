@@ -1,17 +1,24 @@
 "use client";
 
 import { albumCoverClass } from "@/components/BrandMark";
-import { IconPhoto } from "@/components/Icons";
+import { IconFolder, IconPhoto } from "@/components/Icons";
 import { BusyLink, ThumbImage } from "@/components/Loading";
+import { formatAlbumMeta } from "@/lib/format";
 import { prefetchAlbum, prefetchLibraryView } from "@/lib/gallery-cache";
 import type { Album } from "@/lib/types";
 
-function CoverFallback({ albumId }: { albumId: string }) {
+function CoverFallback({ album }: { album: Album }) {
+  const hasFolders = (album.folderCount ?? 0) > 0;
+
   return (
     <span
-      className={`flex h-full w-full items-center justify-center bg-gradient-to-br ${albumCoverClass(albumId)}`}
+      className={`flex h-full w-full items-center justify-center bg-gradient-to-br ${albumCoverClass(album.id)}`}
     >
-      <IconPhoto className="h-8 w-8 text-white/35" />
+      {hasFolders ? (
+        <IconFolder className="h-8 w-8 text-white/35" />
+      ) : (
+        <IconPhoto className="h-8 w-8 text-white/35" />
+      )}
     </span>
   );
 }
@@ -40,8 +47,13 @@ export function AlbumCoverCard({
             className="absolute inset-0 h-full w-full object-cover"
           />
         ) : (
-          <CoverFallback albumId={album.id} />
+          <CoverFallback album={album} />
         )}
+        {album.folderCount ? (
+          <span className="absolute left-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur-sm">
+            <IconFolder className="h-3.5 w-3.5" />
+          </span>
+        ) : null}
       </span>
       <span
         title={album.name}
@@ -50,9 +62,7 @@ export function AlbumCoverCard({
         {album.name}
       </span>
       <span className="mt-0.5 w-full truncate text-center text-[12px] leading-tight text-muted">
-        {typeof album.itemCount === "number"
-          ? album.itemCount.toLocaleString("id-ID")
-          : "\u00a0"}
+        {formatAlbumMeta(album) || "\u00a0"}
       </span>
     </BusyLink>
   );

@@ -107,6 +107,19 @@ export function IconPhoto({ className }: { className?: string }) {
   );
 }
 
+export function IconFolder({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className={className}>
+      <path
+        d="M3.5 7.2c0-1.1.9-2 2-2h3.4c.6 0 1.2.3 1.6.8l1 1.4h7c1.1 0 2 .9 2 2v8.4c0 1.1-.9 2-2 2H5.5c-1.1 0-2-.9-2-2V7.2Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function IconCheck({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className={className}>

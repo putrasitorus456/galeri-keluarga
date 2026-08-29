@@ -16,3 +16,22 @@ export function formatItemCount(
 ) {
   return `${count.toLocaleString("id-ID")} ${kind}`;
 }
+
+export function formatFolderCount(count: number) {
+  return `${count.toLocaleString("id-ID")} folder`;
+}
+
+/** Baris keterangan kartu album: jumlah subfolder lebih dulu, lalu jumlah media. */
+export function formatAlbumMeta(album: {
+  itemCount?: number;
+  folderCount?: number;
+}) {
+  const folders = album.folderCount ?? 0;
+  const items = album.itemCount;
+
+  if (folders > 0) {
+    const label = formatFolderCount(folders);
+    return items ? `${label} \u00b7 ${formatItemCount(items)}` : label;
+  }
+  return typeof items === "number" ? items.toLocaleString("id-ID") : "";
+}

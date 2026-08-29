@@ -7,7 +7,7 @@ Google Drive hanya dipakai sebagai tempat penyimpanan. PIN aplikasi melindungi a
 ## Persyaratan
 
 - Node.js 20 atau lebih baru
-- Folder Google Drive (contoh: `Family Photo`) yang berisi album sebagai subfolder
+- Folder Google Drive (contoh: `Family Photo`) yang berisi album sebagai subfolder. Album boleh bertingkat: subfolder di dalam album ikut tampil sebagai folder yang bisa dibuka, sampai 8 tingkat di bawah root.
 - Google Cloud project dengan Drive API
 
 ## Setup Google Drive

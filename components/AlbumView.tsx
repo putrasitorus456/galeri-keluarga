@@ -3,7 +3,7 @@
 import { useCallback, useLayoutEffect, useState } from "react";
 import { apiFetch, userMessage } from "@/lib/api-client";
 import { MESSAGES } from "@/lib/errors";
-import { formatDuration, formatItemCount } from "@/lib/format";
+import { formatDuration, formatFolderCount, formatItemCount } from "@/lib/format";
 import {
   cacheClear,
   cacheGet,
@@ -11,18 +11,59 @@ import {
   cacheMediaList,
   cacheSet,
   libraryCacheKey,
+  prefetchAlbum,
   warmMedia,
 } from "@/lib/gallery-cache";
+import { useLongPress } from "@/lib/use-long-press";
 import { useScrollMemory } from "@/lib/use-scroll-memory";
-import type { Album, MediaItem, MediaListResponse, MediaType } from "@/lib/types";
+import type {
+  Album,
+  AlbumCrumb,
+  MediaItem,
+  MediaListResponse,
+  MediaType,
+} from "@/lib/types";
+import { AlbumCoverCard } from "@/components/AlbumCoverCard";
 import { AppHeader } from "@/components/AppHeader";
 import { ActionMenu, BottomDock, IconButton } from "@/components/Chrome";
 import { useDownloadFlow } from "@/components/DownloadPopup";
-import { IconCheck, IconDownload, IconLogout, IconPlay, IconRefresh, IconSort } from "@/components/Icons";
+import { IconCheck, IconChevron, IconDownload, IconLogout, IconPlay, IconRefresh, IconSort } from "@/components/Icons";
 import { BusyLink, Spinner, ThumbImage } from "@/components/Loading";
 import { EmptyState, ErrorState, MediaSkeleton } from "@/components/States";
 
 type Filter = "all" | MediaType;
+
+/** Jejak album induk, dari beranda sampai satu tingkat di atas album aktif. */
+function Breadcrumb({ trail }: { trail: AlbumCrumb[] }) {
+  return (
+    <nav aria-label="Lokasi album" className="px-4 pb-2">
+      <ol className="flex flex-wrap items-center gap-x-1 text-[13px] text-muted">
+        <li>
+          <BusyLink
+            href="/"
+            label="Membuka beranda"
+            className="rounded px-0.5 py-0.5 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+          >
+            Beranda
+          </BusyLink>
+        </li>
+        {trail.map((crumb) => (
+          <li key={crumb.id} className="flex min-w-0 items-center gap-1">
+            <IconChevron className="h-3.5 w-3.5 shrink-0 opacity-60" />
+            <BusyLink
+              href={`/album/${crumb.id}`}
+              label={`Membuka ${crumb.name}`}
+              onPointerDown={() => void prefetchAlbum(crumb.id)}
+              className="max-w-[9rem] truncate rounded px-0.5 py-0.5 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+            >
+              {crumb.name}
+            </BusyLink>
+          </li>
+        ))}
+      </ol>
+    </nav>
+  );
+}
 
 type LibraryOptions = {
   title: string;
@@ -30,6 +71,86 @@ type LibraryOptions = {
   collection?: string;
   basePath?: string;
 };
+
+function MediaTile({
+  item,
+  href,
+  eager,
+  selectMode,
+  selected,
+  onToggle,
+  onLongPress,
+}: {
+  item: MediaItem;
+  href: string;
+  eager: boolean;
+  selectMode: boolean;
+  selected: boolean;
+  onToggle: () => void;
+  onLongPress: () => void;
+}) {
+  const longPress = useLongPress(selectMode ? null : onLongPress);
+  const duration =
+    item.type === "video" && item.durationMs
+      ? formatDuration(item.durationMs)
+      : null;
+
+  const inner = (
+    <>
+      <ThumbImage
+        src={item.thumbnailUrl}
+        alt={item.name}
+        eager={eager}
+        className="h-full w-full object-cover"
+      />
+      {item.type === "video" ? (
+        <span className="absolute bottom-1 left-1 inline-flex items-center rounded-md bg-black/70 px-1 py-px text-[10px] font-medium tabular-nums text-white">
+          {duration ?? <IconPlay className="h-3 w-3" />}
+        </span>
+      ) : null}
+      {selectMode ? (
+        <span
+          className={`absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full ${
+            selected
+              ? "bg-white text-black"
+              : "bg-black/35 text-transparent ring-1 ring-white/80"
+          }`}
+        >
+          <IconCheck className="h-3.5 w-3.5" />
+        </span>
+      ) : null}
+    </>
+  );
+
+  return (
+    <li
+      className="press-tile group relative aspect-square overflow-hidden bg-paper-deep"
+      {...longPress}
+    >
+      {selectMode ? (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-pressed={selected}
+          aria-label={`Pilih ${item.name}`}
+          className="absolute inset-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+        >
+          {inner}
+        </button>
+      ) : (
+        <BusyLink
+          href={href}
+          label="Membuka kenangan"
+          onPointerDown={() => warmMedia(item)}
+          onPointerEnter={() => warmMedia(item)}
+          className="absolute inset-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+        >
+          {inner}
+        </BusyLink>
+      )}
+    </li>
+  );
+}
 
 export function AlbumView({
   albumId,
@@ -55,6 +176,10 @@ export function AlbumView({
 
   const [album, setAlbum] = useState<Album | null>(
     cached?.album ?? (library ? { id: "library", name: library.title } : null),
+  );
+  const [subAlbums, setSubAlbums] = useState<Album[]>(cached?.subAlbums ?? []);
+  const [breadcrumb, setBreadcrumb] = useState<AlbumCrumb[]>(
+    cached?.breadcrumb ?? [],
   );
   const [items, setItems] = useState<MediaItem[]>(cached?.items ?? []);
   const [nextPageToken, setNextPageToken] = useState<string | undefined>(
@@ -96,6 +221,10 @@ export function AlbumView({
             name: library?.title ?? "Album",
           },
         );
+        if (!append) {
+          setSubAlbums(data.subAlbums ?? []);
+          setBreadcrumb(data.breadcrumb ?? []);
+        }
         setItems((current) =>
           append ? [...current, ...data.items] : data.items,
         );
@@ -120,6 +249,8 @@ export function AlbumView({
           name: library?.title ?? "Album",
         },
       );
+      setSubAlbums(existing.subAlbums ?? []);
+      setBreadcrumb(existing.breadcrumb ?? []);
       setItems(existing.items);
       setNextPageToken(existing.nextPageToken);
       setTotal(existing.total);
@@ -127,6 +258,8 @@ export function AlbumView({
       if (cacheIsFresh(cacheKey)) return;
     } else {
       setLoading(true);
+      setSubAlbums([]);
+      setBreadcrumb([]);
       setItems([]);
     }
     void load({}).finally(() => setLoading(false));
@@ -150,6 +283,12 @@ export function AlbumView({
     await load({ pageToken: nextPageToken, append: true });
     setLoadingMore(false);
   }
+
+  /** Tekan-tahan sebuah media: masuk mode pilih dengan item itu sudah tertandai. */
+  const startSelection = useCallback((id: string) => {
+    setSelectMode(true);
+    setSelected(new Set([id]));
+  }, []);
 
   function toggleSelect(id: string) {
     setSelected((current) => {
@@ -180,9 +319,21 @@ export function AlbumView({
   const isTab =
     library?.type === "image" || library?.type === "video";
   const showDock = Boolean(library) && !selectMode;
+  const ancestors = breadcrumb.slice(0, -1);
+  const parentAlbumId = ancestors.at(-1)?.id;
+  const mediaCount = total ?? items.length;
   const subtitle = loading
     ? "Memuat..."
-    : formatItemCount(total ?? items.length, kind);
+    : [
+        subAlbums.length > 0 ? formatFolderCount(subAlbums.length) : null,
+        mediaCount > 0 || subAlbums.length === 0
+          ? formatItemCount(mediaCount, kind)
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" \u00b7 ");
+  const showFolders = subAlbums.length > 0 && !selectMode;
+  const isEmpty = items.length === 0 && subAlbums.length === 0;
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-6xl flex-col bg-black">
@@ -193,7 +344,9 @@ export function AlbumView({
             : heading
         }
         subtitle={selectMode ? undefined : subtitle}
-        backHref={isTab ? undefined : "/"}
+        backHref={
+          isTab ? undefined : parentAlbumId ? `/album/${parentAlbumId}` : "/"
+        }
         large={isTab && !selectMode}
         actions={
           selectMode ? (
@@ -260,15 +413,19 @@ export function AlbumView({
         ]}
       />
 
+      {ancestors.length > 0 && !selectMode ? (
+        <Breadcrumb trail={ancestors} />
+      ) : null}
+
       <main className={`flex flex-1 flex-col ${showDock ? "pb-28" : "pb-8"}`}>
         {error ? (
           <ErrorState
             message={error}
             onRetry={() => void load({ fresh: true })}
           />
-        ) : loading && items.length === 0 ? (
+        ) : loading && isEmpty ? (
           <MediaSkeleton />
-        ) : items.length === 0 ? (
+        ) : isEmpty ? (
           <EmptyState
             message={
               library?.type === "video"
@@ -280,77 +437,40 @@ export function AlbumView({
           />
         ) : (
           <>
-            <ul className="grid grid-cols-3 gap-px bg-black sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
-              {items.map((item, index) => {
-                const isSelected = selected.has(item.id);
-                const duration =
-                  item.type === "video" && item.durationMs
-                    ? formatDuration(item.durationMs)
-                    : null;
-                const inner = (
-                  <>
-                    <ThumbImage
-                      src={item.thumbnailUrl}
-                      alt={item.name}
-                      eager={index < 12}
-                      className="h-full w-full object-cover"
-                    />
-                    {item.type === "video" ? (
-                      <span className="absolute bottom-1 left-1 inline-flex items-center rounded-md bg-black/70 px-1 py-px text-[10px] font-medium tabular-nums text-white">
-                        {duration ?? (
-                          <IconPlay className="h-3 w-3" />
-                        )}
-                      </span>
-                    ) : null}
-                    {selectMode ? (
-                      <span
-                        className={`absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full ${
-                          isSelected
-                            ? "bg-white text-black"
-                            : "bg-black/35 text-transparent ring-1 ring-white/80"
-                        }`}
-                      >
-                        <IconCheck className="h-3.5 w-3.5" />
-                      </span>
-                    ) : null}
-                  </>
-                );
+            {showFolders ? (
+              <section className="px-4 pb-5 pt-1">
+                <h2 className="mb-3 text-[15px] font-semibold tracking-tight text-white">
+                  Folder
+                </h2>
+                <ul className="grid grid-cols-3 gap-x-3 gap-y-5">
+                  {subAlbums.map((sub) => (
+                    <li key={sub.id}>
+                      <AlbumCoverCard album={sub} />
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
 
-                return (
-                  <li
-                    key={item.id}
-                    className="group relative aspect-square overflow-hidden bg-paper-deep"
-                  >
-                    {selectMode ? (
-                      <button
-                        type="button"
-                        onClick={() => toggleSelect(item.id)}
-                        aria-pressed={isSelected}
-                        aria-label={`Pilih ${item.name}`}
-                        className="absolute inset-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-                      >
-                        {inner}
-                      </button>
-                    ) : (
-                      <BusyLink
-                        href={
-                          library?.basePath
-                            ? `${library.basePath}/${item.id}`
-                            : item.albumId || albumId
-                              ? `/album/${item.albumId ?? albumId}/${item.id}`
-                              : `/m/${item.id}`
-                        }
-                        label="Membuka kenangan"
-                        onPointerDown={() => warmMedia(item)}
-                        onPointerEnter={() => warmMedia(item)}
-                        className="absolute inset-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-                      >
-                        {inner}
-                      </BusyLink>
-                    )}
-                  </li>
-                );
-              })}
+            <ul className="grid grid-cols-3 gap-px bg-black sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
+              {items.map((item, index) => (
+                <MediaTile
+                  key={item.id}
+                  item={item}
+                  href={
+                    library?.basePath
+                      ? `${library.basePath}/${item.id}`
+                      : item.albumId || albumId
+                        ? `/album/${item.albumId ?? albumId}/${item.id}`
+                        : `/m/${item.id}`
+                  }
+                  eager={index < 12}
+                  selectMode={selectMode}
+                  selected={selected.has(item.id)}
+                  onToggle={() => toggleSelect(item.id)}
+                  onLongPress={() => startSelection(item.id)}
+                />
+              ))}
             </ul>
 
             {nextPageToken ? (

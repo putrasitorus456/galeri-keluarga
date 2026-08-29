@@ -7,7 +7,14 @@ export type Album = {
   imageCount?: number;
   videoCount?: number;
   gifCount?: number;
+  folderCount?: number;
   modifiedTime?: string;
+};
+
+/** Jejak album dari anak langsung root sampai album yang dibuka. */
+export type AlbumCrumb = {
+  id: string;
+  name: string;
 };
 
 export type MediaType = "image" | "video";
@@ -31,6 +38,8 @@ export type AlbumsResponse = {
 
 export type MediaListResponse = {
   album?: Album;
+  breadcrumb?: AlbumCrumb[];
+  subAlbums?: Album[];
   items: MediaItem[];
   nextPageToken?: string;
   total?: number;

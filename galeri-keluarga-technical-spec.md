@@ -692,7 +692,7 @@ Tidak perlu tombol/fitur tambahan.
 
 Untuk album:
 
-- folder lebih dulu bila nested folder didukung;
+- folder lebih dulu (nested folder sudah didukung), diurutkan seperti album lain;
 - file setelahnya.
 
 Untuk file:

@@ -58,6 +58,13 @@ a {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Ubin yang bisa ditekan-tahan: matikan callout dan seleksi bawaan browser. */
+.press-tile {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
