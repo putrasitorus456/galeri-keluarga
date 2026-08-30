@@ -150,8 +150,10 @@ export function BusyLink({
   onPointerEnter,
   onPointerDown,
   prefetch,
+  role,
   "aria-label": ariaLabel,
   "aria-current": ariaCurrent,
+  "aria-pressed": ariaPressed,
 }: {
   href: string;
   label?: string;
@@ -161,15 +163,19 @@ export function BusyLink({
   onPointerEnter?: React.PointerEventHandler<HTMLAnchorElement>;
   onPointerDown?: React.PointerEventHandler<HTMLAnchorElement>;
   prefetch?: boolean;
+  role?: React.AriaRole;
   "aria-label"?: string;
   "aria-current"?: "page" | undefined;
+  "aria-pressed"?: boolean;
 }) {
   return (
     <Link
       href={href}
       prefetch={prefetch}
+      role={role}
       aria-label={ariaLabel}
       aria-current={ariaCurrent}
+      aria-pressed={ariaPressed}
       className={className}
       onPointerEnter={onPointerEnter}
       onPointerDown={onPointerDown}
@@ -208,6 +214,7 @@ export function ThumbImage({
         loading={eager ? "eager" : "lazy"}
         fetchPriority={eager ? "high" : "low"}
         decoding="async"
+        draggable={false}
         onLoad={() => setLoaded(true)}
         onError={() => setLoaded(true)}
         className={`${className ?? ""} ${loaded ? "opacity-100" : "opacity-0"} transition-opacity duration-200`}

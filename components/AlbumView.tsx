@@ -89,11 +89,21 @@ function MediaTile({
   onToggle: () => void;
   onLongPress: () => void;
 }) {
-  const longPress = useLongPress(selectMode ? null : onLongPress);
+  const { handlers, takeLongPress } = useLongPress(
+    selectMode ? null : onLongPress,
+  );
   const duration =
     item.type === "video" && item.durationMs
       ? formatDuration(item.durationMs)
       : null;
+
+  function interceptClick(event: React.MouseEvent) {
+    const afterLongPress = takeLongPress();
+    if (!afterLongPress && !selectMode) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (selectMode && !afterLongPress) onToggle();
+  }
 
   const inner = (
     <>
@@ -125,29 +135,27 @@ function MediaTile({
   return (
     <li
       className="press-tile group relative aspect-square overflow-hidden bg-paper-deep"
-      {...longPress}
+      {...handlers}
+      onClickCapture={interceptClick}
     >
-      {selectMode ? (
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-pressed={selected}
-          aria-label={`Pilih ${item.name}`}
-          className="absolute inset-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-        >
-          {inner}
-        </button>
-      ) : (
-        <BusyLink
-          href={href}
-          label="Membuka kenangan"
-          onPointerDown={() => warmMedia(item)}
-          onPointerEnter={() => warmMedia(item)}
-          className="absolute inset-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-        >
-          {inner}
-        </BusyLink>
-      )}
+      {/* Selalu tautan, bahkan di mode pilih: mengganti elemen di tengah tahanan
+          membuat menu bawaan browser lolos. */}
+      <BusyLink
+        href={href}
+        label="Membuka kenangan"
+        role={selectMode ? "button" : undefined}
+        aria-pressed={selectMode ? selected : undefined}
+        aria-label={selectMode ? `Pilih ${item.name}` : undefined}
+        onPointerDown={() => {
+          if (!selectMode) warmMedia(item);
+        }}
+        onPointerEnter={() => {
+          if (!selectMode) warmMedia(item);
+        }}
+        className="absolute inset-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+      >
+        {inner}
+      </BusyLink>
     </li>
   );
 }

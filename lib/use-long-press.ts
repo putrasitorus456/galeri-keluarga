@@ -7,9 +7,14 @@ const HOLD_MS = 450;
 const MOVE_TOLERANCE_PX = 12;
 
 /**
- * Tekan-tahan ala galeri ponsel. Handler-nya dipasang di elemen pembungkus,
- * sehingga klik tautan di dalamnya bisa dibatalkan saat tahanan berhasil.
- * Kirim `null` untuk menonaktifkan (mis. saat mode pilih sudah aktif).
+ * Tekan-tahan ala galeri ponsel. Handler-nya dipasang di elemen pembungkus.
+ *
+ * Penting: elemen yang disentuh tidak boleh dilepas dari DOM saat tahanan
+ * memicu aksi. Browser mengirim `contextmenu` beberapa puluh milidetik setelah
+ * itu, dan kalau simpulnya sudah terlepas, event-nya tidak merambat ke sini
+ * sehingga menu bawaan browser tidak bisa dicegah.
+ *
+ * Kirim `null` untuk menonaktifkan.
  */
 export function useLongPress(onLongPress: (() => void) | null) {
   const timer = useRef<number | null>(null);
@@ -29,12 +34,15 @@ export function useLongPress(onLongPress: (() => void) | null) {
 
   const start = useCallback(
     (event: React.PointerEvent) => {
+      // Selalu disetel ulang, termasuk saat hook nonaktif, supaya sisa tahanan
+      // lama tidak ikut menelan ketukan berikutnya.
+      fromTouch.current = event.pointerType !== "mouse";
+      triggered.current = false;
+      cancel();
+
       if (!onLongPress) return;
       if (event.pointerType === "mouse" && event.button !== 0) return;
 
-      cancel();
-      triggered.current = false;
-      fromTouch.current = event.pointerType !== "mouse";
       origin.current = { x: event.clientX, y: event.clientY };
 
       timer.current = window.setTimeout(() => {
@@ -59,25 +67,27 @@ export function useLongPress(onLongPress: (() => void) | null) {
     [cancel],
   );
 
-  const swallowClick = useCallback((event: React.MouseEvent) => {
-    if (!triggered.current) return;
-    triggered.current = false;
-    event.preventDefault();
-    event.stopPropagation();
-  }, []);
-
-  const swallowContextMenu = useCallback((event: React.MouseEvent) => {
-    // Menu bawaan browser hanya diblokir untuk sentuhan, agar klik kanan di desktop tetap normal.
+  const blockContextMenu = useCallback((event: React.MouseEvent) => {
+    // Hanya untuk sentuhan, agar klik kanan di desktop tetap berperilaku normal.
     if (fromTouch.current) event.preventDefault();
   }, []);
 
+  /** True sekali saja bila klik yang datang adalah sisa dari tahanan yang sudah terpicu. */
+  const takeLongPress = useCallback(() => {
+    if (!triggered.current) return false;
+    triggered.current = false;
+    return true;
+  }, []);
+
   return {
-    onPointerDown: start,
-    onPointerMove: track,
-    onPointerUp: cancel,
-    onPointerCancel: cancel,
-    onPointerLeave: cancel,
-    onClickCapture: swallowClick,
-    onContextMenu: swallowContextMenu,
+    handlers: {
+      onPointerDown: start,
+      onPointerMove: track,
+      onPointerUp: cancel,
+      onPointerCancel: cancel,
+      onPointerLeave: cancel,
+      onContextMenu: blockContextMenu,
+    },
+    takeLongPress,
   };
 }
