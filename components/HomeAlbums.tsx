@@ -335,7 +335,7 @@ export function HomeAlbums({
             ) : null}
 
             <section className="mt-8">
-              <SectionTitle title="Unggulan" />
+              <SectionTitle title="Kategori" />
               <ul className="grid grid-cols-3 gap-x-3 gap-y-5 px-4">
                 <li>
                   <CollageCard
