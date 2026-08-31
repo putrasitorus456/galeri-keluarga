@@ -25,6 +25,7 @@ export const COLLECTION_DEFS = [
   { slug: "natal", label: "Natal", pattern: /natal|christmas/i },
   { slug: "pelantikan", label: "Pelantikan", pattern: /pelantikan/i },
   { slug: "jalan-jalan", label: "Jalan Jalan", pattern: /jalan[-\s]*jalan|jalan2/i },
+  { slug: "gereja", label: "Gereja", pattern: /gereja/i },
 ] as const;
 
 export type CollectionDef = (typeof COLLECTION_DEFS)[number];
