@@ -9,7 +9,7 @@ const sans = Inter({
 });
 
 const APP_NAME = "Album Kita";
-const APP_DESCRIPTION = "Kenangan foto dan video keluarga, mudah dilihat dan diunduh.";
+const APP_DESCRIPTION = "Aplikasi berisi kumpulan kenangan foto dan video dari keluarga kita";
 
 export const metadata: Metadata = {
   applicationName: APP_NAME,
