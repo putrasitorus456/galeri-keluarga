@@ -24,7 +24,8 @@ export function formatFolderCount(count: number) {
 /**
  * Baris keterangan kartu album.
  * - Tanpa subfolder: "243 item"
- * - Ada subfolder: "2 folder dan 310 item" (item = isi langsung album, bukan isi folder anak)
+ * - Hanya subfolder: "3 folder"
+ * - Ada subfolder + item: "2 folder dan 310 item" (item = isi langsung album, bukan isi folder anak)
  */
 export function formatAlbumMeta(album: {
   itemCount?: number;
@@ -36,8 +37,11 @@ export function formatAlbumMeta(album: {
   if (typeof items !== "number") {
     return folders > 0 ? formatFolderCount(folders) : "";
   }
-  if (folders > 0) {
+  if (folders > 0 && items > 0) {
     return `${formatFolderCount(folders)} dan ${formatItemCount(items)}`;
+  }
+  if (folders > 0) {
+    return formatFolderCount(folders);
   }
   return formatItemCount(items);
 }

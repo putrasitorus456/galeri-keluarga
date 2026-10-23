@@ -3,15 +3,18 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { apiFetch, userMessage } from "@/lib/api-client";
 import { MESSAGES } from "@/lib/errors";
-import { formatDuration, formatFolderCount, formatItemCount } from "@/lib/format";
 import {
-  appendCachedAlbumItems,
+  formatDuration,
+  formatFolderCount,
+  formatItemCount,
+} from "@/lib/format";
+import {
+  appendCachedMediaPage,
   cacheClear,
   cacheGet,
   cacheIsFresh,
   cachedAlbums,
   cacheMedia,
-  cacheMediaList,
   cacheSet,
   libraryCacheKey,
   prefetchAlbum,
@@ -32,7 +35,7 @@ import type {
   MediaListResponse,
   MediaType,
 } from "@/lib/types";
-import { AlbumCoverCard } from "@/components/AlbumCoverCard";
+import { FolderChip } from "@/components/AlbumCoverCard";
 import { AppHeader } from "@/components/AppHeader";
 import { ActionMenu, BottomDock, IconButton } from "@/components/Chrome";
 import { useDownloadFlow } from "@/components/DownloadPopup";
@@ -172,7 +175,7 @@ function MediaTile({
           membuat menu bawaan browser lolos. */}
       <BusyLink
         href={href}
-        label="Membuka kenangan"
+        label="Membuka media"
         role={selectMode ? "button" : undefined}
         aria-pressed={selectMode ? selected : undefined}
         aria-label={selectMode ? `Pilih ${item.name}` : undefined}
@@ -270,11 +273,7 @@ export function AlbumView({
           data.total !== undefined ? data.total : append ? prev : undefined,
         );
         if (!append) cacheSet(cacheKey, data);
-        else if (albumId) {
-          appendCachedAlbumItems(albumId, data, filter);
-        } else {
-          cacheMediaList(data.items, albumId);
-        }
+        else appendCachedMediaPage(cacheKey, data);
         return data;
       } catch (err) {
         setError(userMessage(err));
@@ -404,9 +403,11 @@ export function AlbumView({
   const mediaCount = total ?? album?.itemCount ?? items.length;
   const subtitle = loading
     ? "Memuat..."
-    : subAlbums.length > 0
+    : subAlbums.length > 0 && mediaCount > 0
       ? `${formatFolderCount(subAlbums.length)} dan ${formatItemCount(mediaCount, kind)}`
-      : formatItemCount(mediaCount, kind);
+      : subAlbums.length > 0
+        ? formatFolderCount(subAlbums.length)
+        : formatItemCount(mediaCount, kind);
   const showFolders = subAlbums.length > 0 && !selectMode;
   const isEmpty = items.length === 0 && subAlbums.length === 0;
 
@@ -520,17 +521,17 @@ export function AlbumView({
                 <h2 className="mb-3 text-[15px] font-semibold tracking-tight text-white">
                   Folder
                 </h2>
-                <ul className="grid grid-cols-3 gap-x-3 gap-y-5">
+                <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   {subAlbums.map((sub) => (
-                    <li key={sub.id}>
-                      <AlbumCoverCard album={sub} />
+                    <li key={sub.id} className="min-w-0">
+                      <FolderChip album={sub} />
                     </li>
                   ))}
                 </ul>
               </section>
             ) : null}
 
-            <ul className="grid grid-cols-3 gap-px bg-black sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
+            <ul className="grid grid-cols-3 gap-px bg-black px-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
               {items.map((item, index) => (
                 <MediaTile
                   key={item.id}

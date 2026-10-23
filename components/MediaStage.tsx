@@ -278,6 +278,16 @@ function mediaFileUrl(item: MediaItem) {
   return item.fileUrl || `/api/media/${item.id}/file`;
 }
 
+function isHeicItem(item: MediaItem) {
+  return /heic|heif/i.test(item.mimeType) || /\.hei[cf]$/i.test(item.name);
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 /** Offset pojok kanan-atas isi foto di dalam elemen `object-contain`. */
 function containContentInset(img: HTMLImageElement) {
   const { clientWidth: cw, clientHeight: ch, naturalWidth: nw, naturalHeight: nh } =
@@ -303,6 +313,7 @@ function ImageStage({
 }) {
   const notifiedReady = useRef(false);
   const frameRef = useRef<HTMLImageElement>(null);
+  const fullObjectUrl = useRef<string | null>(null);
   const cached = getCachedPreviewUrl(item.id);
   const [previewSrc, setPreviewSrc] = useState<string | null>(
     () => cached ?? (active ? item.previewUrl : null),
@@ -310,22 +321,21 @@ function ImageStage({
   const [previewReady, setPreviewReady] = useState(
     () => Boolean(cached) || wasMediaOpened(item.id),
   );
-  const [fullSrc, setFullSrc] = useState<string | null>(
-    () => (active ? mediaFileUrl(item) : null),
-  );
+  const [fullSrc, setFullSrc] = useState<string | null>(null);
   const [fullReady, setFullReady] = useState(false);
+  /** True selama masih mengejar kualitas penuh (termasuk upgrade setelah preview). */
+  const [hdPending, setHdPending] = useState(false);
   const [badgeInset, setBadgeInset] = useState<{ top: number; right: number } | null>(
     null,
   );
   const showOpenSpinner = useDelayedFlag(active && !previewReady, 280);
   const showHdBadge = useDelayedFlag(
-    active && previewReady && Boolean(fullSrc) && !fullReady,
+    active && previewReady && hdPending,
     400,
   );
 
   useEffect(() => {
     notifiedReady.current = false;
-    setFullReady(false);
 
     const blobUrl = getCachedPreviewUrl(item.id);
     if (blobUrl) {
@@ -339,10 +349,119 @@ function ImageStage({
       setPreviewSrc(null);
       setPreviewReady(false);
     }
+  }, [active, item, item.id, item.previewUrl]);
 
-    // File asli hanya untuk slide aktif — tetangga cukup pratinjau.
-    setFullSrc(active ? mediaFileUrl(item) : null);
-  }, [active, item, item.id, item.previewUrl, item.fileUrl]);
+  useEffect(() => {
+    if (!active) {
+      setFullSrc(null);
+      setFullReady(false);
+      setHdPending(false);
+      if (fullObjectUrl.current) {
+        URL.revokeObjectURL(fullObjectUrl.current);
+        fullObjectUrl.current = null;
+      }
+      return;
+    }
+
+    let cancelled = false;
+    const base = mediaFileUrl(item);
+
+    // JPEG/PNG: stream lewat <img> (progresif). HEIC perlu fetch agar bisa
+    // baca kualitas + upgrade setelah konversi penuh selesai.
+    if (!isHeicItem(item)) {
+      setFullReady(false);
+      setHdPending(true);
+      setFullSrc(base);
+      const timer = window.setTimeout(() => {
+        if (!cancelled) {
+          setFullSrc(null);
+          setHdPending(false);
+        }
+      }, 90_000);
+      return () => {
+        cancelled = true;
+        window.clearTimeout(timer);
+      };
+    }
+
+    function adoptObjectUrl(next: string) {
+      if (fullObjectUrl.current) URL.revokeObjectURL(fullObjectUrl.current);
+      fullObjectUrl.current = next;
+      setFullSrc(next);
+      setFullReady(true);
+    }
+
+    async function fetchFile(url: string) {
+      const res = await fetch(url, {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!res.ok) throw new Error("file");
+      const quality = res.headers.get("X-Gallery-Quality");
+      const blob = await res.blob();
+      return { objectUrl: URL.createObjectURL(blob), quality };
+    }
+
+    async function waitForHeicFull() {
+      for (let i = 0; i < 90; i += 1) {
+        await sleep(2000);
+        if (cancelled) return false;
+        const check = await fetch(`${base}?check=1`, {
+          credentials: "include",
+          cache: "no-store",
+        });
+        if (!check.ok) continue;
+        const data = (await check.json()) as { ready?: boolean };
+        if (data.ready) return true;
+      }
+      return false;
+    }
+
+    async function loadHeicFull() {
+      setFullReady(false);
+      setHdPending(true);
+
+      try {
+        const first = await fetchFile(base);
+        if (cancelled) {
+          URL.revokeObjectURL(first.objectUrl);
+          return;
+        }
+        adoptObjectUrl(first.objectUrl);
+
+        if (first.quality === "full") {
+          setHdPending(false);
+          return;
+        }
+
+        const ready = await waitForHeicFull();
+        if (cancelled || !ready) {
+          setHdPending(false);
+          return;
+        }
+        const upgraded = await fetchFile(base);
+        if (cancelled) {
+          URL.revokeObjectURL(upgraded.objectUrl);
+          return;
+        }
+        adoptObjectUrl(upgraded.objectUrl);
+      } catch {
+        /* pratinjau tetap dipakai */
+      } finally {
+        if (!cancelled) setHdPending(false);
+      }
+    }
+
+    void loadHeicFull();
+
+    return () => {
+      cancelled = true;
+      if (fullObjectUrl.current) {
+        URL.revokeObjectURL(fullObjectUrl.current);
+        fullObjectUrl.current = null;
+      }
+    };
+  }, [active, item, item.id, item.fileUrl, item.mimeType, item.name]);
 
   useEffect(() => {
     if (!active || !previewReady || notifiedReady.current) return;
@@ -415,8 +534,14 @@ function ImageStage({
           }`}
           fetchPriority={active ? "high" : "low"}
           decoding="async"
-          onLoad={() => setFullReady(true)}
-          onError={() => setFullReady(true)}
+          onLoad={() => {
+            setFullReady(true);
+            if (!isHeicItem(item)) setHdPending(false);
+          }}
+          onError={() => {
+            setFullReady(true);
+            setHdPending(false);
+          }}
         />
       ) : null}
       {showOpenSpinner ? (

@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { iconBtnClass } from "@/components/Chrome";
 import { IconBack } from "@/components/Icons";
 import { useBusy } from "@/components/Loading";
+import { hasCachedPath } from "@/lib/gallery-cache";
 
 type HeaderProps = {
   title: string;
@@ -24,9 +25,11 @@ function BackButton({ href }: { href: string }) {
       aria-label="Kembali"
       className={iconBtnClass}
       onClick={() => {
-        // Sama seperti BusyLink: overlay hold sampai halaman tujuan memanggil hide().
+        // Sama seperti BusyLink: overlay hanya jika tujuan belum di-cache.
         if (window.history.length > 1) {
-          show("Memuat", { hold: true });
+          if (!hasCachedPath(href)) {
+            show("Memuat", { hold: true });
+          }
           router.back();
         } else {
           go(href);

@@ -1,6 +1,7 @@
 "use client";
 
 import { apiFetch } from "@/lib/api-client";
+import { clearSeenThumbs } from "@/lib/thumb-load";
 import type {
   AlbumsResponse,
   MediaItem,
@@ -58,7 +59,8 @@ export function libraryCacheKey(opts: {
   filter?: string;
 }) {
   if (opts.albumId) return `album:${opts.albumId}:${opts.filter ?? "all"}`;
-  return `library:${opts.type ?? "all"}:${opts.collection ?? "all"}`;
+  // v2: halaman library/koleksi dipaginasi (bukan dump penuh).
+  return `library:v2:${opts.type ?? "all"}:${opts.collection ?? "all"}`;
 }
 
 function mediaKey(id: string) {
@@ -257,6 +259,7 @@ export function cacheClear() {
   transcodedIds.clear();
   prefetching.clear();
   memory.clear();
+  clearSeenThumbs();
   if (typeof localStorage !== "undefined") {
     localStorage.removeItem(TRANSCODE_STORE);
   }
@@ -333,12 +336,10 @@ export function findCachedAlbumList(albumId: string, mediaId?: string) {
   return fallback;
 }
 
-export function appendCachedAlbumItems(
-  albumId: string,
+export function appendCachedMediaPage(
+  key: string,
   page: MediaListResponse,
-  filter: "all" | "image" | "video" = "all",
 ) {
-  const key = libraryCacheKey({ albumId, filter });
   const existing = cacheGet<MediaListResponse>(key);
   const seen = new Set(existing?.items.map((item) => item.id) ?? []);
   const merged = [
@@ -355,6 +356,14 @@ export function appendCachedAlbumItems(
   };
   cacheSet(key, next);
   return next;
+}
+
+export function appendCachedAlbumItems(
+  albumId: string,
+  page: MediaListResponse,
+  filter: "all" | "image" | "video" = "all",
+) {
+  return appendCachedMediaPage(libraryCacheKey({ albumId, filter }), page);
 }
 
 export function cachedAlbums() {

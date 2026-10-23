@@ -56,6 +56,7 @@ export type MediaListResponse = {
 export type LibraryMediaResponse = {
   items: MediaItem[];
   total: number;
+  nextPageToken?: string;
 };
 
 export type MediaMetaResponse = {

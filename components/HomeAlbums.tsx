@@ -114,6 +114,8 @@ export function HomeAlbums({
 }: {
   mode?: "home" | "all";
 }) {
+  // Selalu null di SSR + hydrate pertama — cache hanya di useLayoutEffect
+  // agar HTML server dan client cocok (hindari hydration mismatch).
   const [albums, setAlbums] = useState<Album[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -130,10 +132,16 @@ export function HomeAlbums({
       const cached = cacheGet<AlbumsResponse>(CACHE_ALBUMS);
       if (cached) {
         setAlbums(cached.albums);
-        if (cacheIsFresh(CACHE_ALBUMS)) {
-          hide();
-          return;
-        }
+        hide();
+        // Cache masih ada: tampilkan langsung. Revalidate diam-diam jika sudah basi.
+        if (cacheIsFresh(CACHE_ALBUMS)) return;
+        void apiFetch<AlbumsResponse>("/api/albums")
+          .then((data) => {
+            cacheSet(CACHE_ALBUMS, data);
+            setAlbums(data.albums);
+          })
+          .catch(() => undefined);
+        return;
       }
     }
     setError(null);

@@ -18,10 +18,16 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const type = parseType(url.searchParams.get("type"));
   const collection = url.searchParams.get("collection") ?? undefined;
+  const pageToken = url.searchParams.get("pageToken") ?? undefined;
   const fresh = url.searchParams.get("fresh") === "1";
 
   try {
-    const result = await getLibraryMedia({ type, collection, fresh });
+    const result = await getLibraryMedia({
+      type,
+      collection,
+      pageToken,
+      fresh,
+    });
     return cachedJson(result, 30);
   } catch (err) {
     return errorResponse(err);

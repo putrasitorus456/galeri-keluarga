@@ -68,6 +68,25 @@ export function AlbumCoverCard({
   );
 }
 
+/** Chip folder gaya Drive — dipakai untuk subfolder di dalam album. */
+export function FolderChip({ album }: { album: Album }) {
+  return (
+    <BusyLink
+      href={`/album/${album.id}`}
+      label={`Membuka ${album.name}`}
+      onPointerDown={() => void prefetchAlbum(album.id)}
+      onPointerEnter={() => void prefetchAlbum(album.id)}
+      title={album.name}
+      className="flex min-h-12 min-w-0 items-center gap-3 rounded-xl bg-paper-deep px-3.5 py-2.5 text-white transition hover:bg-forest focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+    >
+      <IconFolder className="h-5 w-5 shrink-0 text-muted" />
+      <span className="min-w-0 flex-1 truncate text-left text-[15px] font-medium leading-snug">
+        {album.name}
+      </span>
+    </BusyLink>
+  );
+}
+
 export function CollageCard({
   href,
   title,

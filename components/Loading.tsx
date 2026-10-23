@@ -10,7 +10,13 @@ import {
 } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { acquireThumbSlot, releaseThumbSlot } from "@/lib/thumb-load";
+import { hasCachedPath } from "@/lib/gallery-cache";
+import {
+  acquireThumbSlot,
+  markThumbSeen,
+  releaseThumbSlot,
+  thumbWasSeen,
+} from "@/lib/thumb-load";
 
 type BusyOptions = {
   /**
@@ -69,7 +75,7 @@ export function BusyProvider({ children }: { children: React.ReactNode }) {
   const go = useCallback(
     (href: string, label = "Memuat") => {
       const path = normalizePath(href);
-      if (path !== pathname) {
+      if (path !== pathname && !hasCachedPath(path)) {
         show(label, { hold: true });
       }
       router.push(href);
@@ -244,13 +250,13 @@ export function LoadingOverlay({
 }
 
 /**
- * Selalu tampilkan loading saat pindah halaman (kecuali path sama).
- * Termasuk buka foto dari album — overlay hilang saat viewer memanggil hide().
- * Jangan skip karena cache — prefetch hover sering membuat loading "kadang muncul
- * kadang tidak", yang terasa tidak konsisten.
+ * Overlay navigasi hanya jika tujuan belum punya data di cache.
+ * Kembali ke list album / album yang sudah pernah dibuka harus instan.
  */
 function shouldShowNavBusy(href: string, pathname: string) {
-  return normalizePath(href) !== pathname;
+  const path = normalizePath(href);
+  if (path === pathname) return false;
+  return !hasCachedPath(path);
 }
 
 export function BusyLink({
@@ -327,19 +333,23 @@ export function ThumbImage({
 }) {
   const rootRef = useRef<HTMLSpanElement>(null);
   const identity = `${remoteSrc ?? ""}\0${src}`;
+  const warmed = thumbWasSeen(src, remoteSrc);
   const [current, setCurrent] = useState(identity);
-  const [visible, setVisible] = useState(eager);
-  const [activeSrc, setActiveSrc] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  const [visible, setVisible] = useState(eager || warmed);
+  const [activeSrc, setActiveSrc] = useState<string | null>(
+    warmed ? remoteSrc || src : null,
+  );
+  const [loaded, setLoaded] = useState(warmed);
   const holdingSlot = useRef(false);
   const startedFor = useRef<string | null>(null);
   const usingRemote = useRef(Boolean(remoteSrc));
 
   if (identity !== current) {
+    const nextWarm = thumbWasSeen(src, remoteSrc);
     setCurrent(identity);
-    setLoaded(false);
-    setActiveSrc(null);
-    setVisible(eager);
+    setLoaded(nextWarm);
+    setActiveSrc(nextWarm ? remoteSrc || src : null);
+    setVisible(eager || nextWarm);
     usingRemote.current = Boolean(remoteSrc);
   }
 
@@ -352,7 +362,7 @@ export function ThumbImage({
   }, [identity]);
 
   useEffect(() => {
-    if (eager) {
+    if (eager || thumbWasSeen(src, remoteSrc)) {
       setVisible(true);
       return;
     }
@@ -369,13 +379,20 @@ export function ThumbImage({
     );
     observer.observe(node);
     return () => observer.disconnect();
-  }, [eager, identity]);
+  }, [eager, identity, remoteSrc, src]);
 
   useEffect(() => {
     if (!visible) return;
     if (startedFor.current === identity) return;
     startedFor.current = identity;
     usingRemote.current = Boolean(remoteSrc);
+
+    // Preview yang pernah tampil: jangan antri slot lagi — biar kembali ke list instan.
+    if (thumbWasSeen(src, remoteSrc)) {
+      setActiveSrc(remoteSrc || src);
+      setLoaded(true);
+      return;
+    }
 
     let cancelled = false;
     void acquireThumbSlot().then(() => {
@@ -410,6 +427,7 @@ export function ThumbImage({
   }
 
   function finish() {
+    markThumbSeen(src, remoteSrc);
     setLoaded(true);
     releaseSlot();
   }
@@ -434,14 +452,16 @@ export function ThumbImage({
         <img
           src={activeSrc}
           alt={alt}
-          fetchPriority={eager ? "high" : "low"}
+          fetchPriority={eager || warmed ? "high" : "low"}
           decoding="async"
           referrerPolicy="no-referrer"
           draggable={false}
           onLoadStart={releaseSlot}
           onLoad={finish}
           onError={handleError}
-          className={`${className ?? ""} ${loaded ? "opacity-100" : "opacity-0"} transition-opacity duration-200`}
+          className={`${className ?? ""} ${loaded ? "opacity-100" : "opacity-0"} ${
+            warmed ? "" : "transition-opacity duration-200"
+          }`}
         />
       ) : null}
     </span>

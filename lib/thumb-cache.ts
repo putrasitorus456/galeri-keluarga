@@ -187,7 +187,8 @@ async function readNearestDiskThumb(
   return hit;
 }
 
-export async function readCachedThumb(
+/** Hanya exact key — jangan naikkan thumb kecil jadi seolah ukuran penuh. */
+export async function readCachedThumbExact(
   fileId: string,
   size: number,
 ): Promise<CachedThumb | null> {
@@ -200,6 +201,15 @@ export async function readCachedThumb(
     rememberMemory(fileId, size, exact.bytes, exact.contentType);
     return exact;
   }
+  return null;
+}
+
+export async function readCachedThumb(
+  fileId: string,
+  size: number,
+): Promise<CachedThumb | null> {
+  const exact = await readCachedThumbExact(fileId, size);
+  if (exact) return exact;
 
   const nearest = await readNearestDiskThumb(fileId, size);
   if (nearest) {

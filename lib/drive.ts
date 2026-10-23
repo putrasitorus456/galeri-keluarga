@@ -41,7 +41,8 @@ const COUNT_PAGE_SIZE = 1000;
 const COUNT_MAX_PAGES = 5;
 const LITE_PAGE_SIZE = 100;
 const SUMMARY_CONCURRENCY = 8;
-const LIBRARY_MAX_ITEMS = 2000;
+/** Batas gabungan library/koleksi; paginasi UI memakai PAGE_SIZE di atas ini. */
+const LIBRARY_MAX_ITEMS = 5000;
 const META_TTL_MS = 10 * 60 * 1000;
 
 /**
@@ -784,10 +785,30 @@ function filterFoldersByPattern(folders: FolderRef[], pattern: RegExp) {
   return folders.filter(matches);
 }
 
+function parseLibraryOffset(pageToken: string | undefined) {
+  if (!pageToken) return 0;
+  const offset = Number.parseInt(pageToken, 10);
+  if (!Number.isFinite(offset) || offset < 0) return 0;
+  return offset;
+}
+
+/** Potong hasil gabungan library/koleksi — token = offset numerik. */
+function paginateLibraryItems(all: MediaItem[], pageToken: string | undefined) {
+  const offset = parseLibraryOffset(pageToken);
+  const items = all.slice(offset, offset + PAGE_SIZE);
+  const next = offset + items.length;
+  return {
+    items,
+    total: all.length,
+    nextPageToken: next < all.length ? String(next) : undefined,
+  };
+}
+
 export async function getLibraryMedia(opts: {
   type?: LibraryKind;
   collection?: string;
   fresh?: boolean;
+  pageToken?: string;
 }) {
   const typeKey = opts.type ?? "all";
   const collectionKey = opts.collection ?? "all";
@@ -815,15 +836,17 @@ export async function getLibraryMedia(opts: {
     return { items, total: items.length };
   };
 
-  if (opts.fresh) {
-    revalidateTag("albums");
-    return load();
-  }
+  const full = opts.fresh
+    ? await (async () => {
+        revalidateTag("albums");
+        return load();
+      })()
+    : await unstable_cache(load, ["library-v5", typeKey, collectionKey], {
+        tags: ["albums"],
+        revalidate: 600,
+      })();
 
-  return unstable_cache(load, ["library-v4", typeKey, collectionKey], {
-    tags: ["albums"],
-    revalidate: 600,
-  })();
+  return paginateLibraryItems(full.items, opts.pageToken);
 }
 
 function mediaCountFromScan(

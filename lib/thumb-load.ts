@@ -7,6 +7,23 @@ const MAX_ACTIVE = 20;
 let active = 0;
 const waiters: Array<() => void> = [];
 
+/** URL preview yang sudah pernah sukses ditampilkan di sesi ini. */
+const seenThumbs = new Set<string>();
+
+export function thumbWasSeen(...urls: Array<string | undefined | null>) {
+  return urls.some((url) => Boolean(url && seenThumbs.has(url)));
+}
+
+export function markThumbSeen(...urls: Array<string | undefined | null>) {
+  for (const url of urls) {
+    if (url) seenThumbs.add(url);
+  }
+}
+
+export function clearSeenThumbs() {
+  seenThumbs.clear();
+}
+
 export function acquireThumbSlot(): Promise<void> {
   if (active < MAX_ACTIVE) {
     active += 1;

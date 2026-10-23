@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { apiFetch, userMessage } from "@/lib/api-client";
 import {
   appendCachedAlbumItems,
+  appendCachedMediaPage,
   cacheGet,
   cacheMedia,
   cacheSet,
@@ -63,27 +64,14 @@ export function MediaViewer({
     ? libraryCacheKey({ type: library.type, collection: library.collection })
     : undefined;
 
-  const cachedAlbumList =
-    !library && albumId ? findCachedAlbumList(albumId, mediaId) : undefined;
-  const cachedList =
-    cachedAlbumList ??
-    (libraryKey ? cacheGet<MediaListResponse>(libraryKey) : undefined);
-
+  // SSR-safe defaults; sessionStorage cache is applied in useLayoutEffect
+  // so the first client render matches the server HTML.
   const [currentId, setCurrentId] = useState(mediaId);
-  const [media, setMedia] = useState<MediaItem | null>(
-    () =>
-      getCachedMedia(mediaId)?.media ??
-      cachedList?.items.find((item) => item.id === mediaId) ??
-      null,
-  );
-  const [items, setItems] = useState<MediaItem[]>(cachedList?.items ?? []);
-  const [albumName, setAlbumName] = useState(cachedAlbumList?.album?.name);
-  const [listFilter, setListFilter] = useState<"all" | "image" | "video">(
-    cachedAlbumList?.filter ?? "all",
-  );
-  const [nextPageToken, setNextPageToken] = useState(
-    cachedAlbumList?.nextPageToken,
-  );
+  const [media, setMedia] = useState<MediaItem | null>(null);
+  const [items, setItems] = useState<MediaItem[]>([]);
+  const [albumName, setAlbumName] = useState<string | undefined>();
+  const [listFilter, setListFilter] = useState<"all" | "image" | "video">("all");
+  const [nextPageToken, setNextPageToken] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"share" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -196,12 +184,26 @@ export function MediaViewer({
   }, [currentItem, error, hide]);
 
   useLayoutEffect(() => {
+    const cachedAlbumList =
+      !library && albumId
+        ? findCachedAlbumList(albumId, currentId)
+        : undefined;
     const list =
-      (!library && albumId ? findCachedAlbumList(albumId, currentId) : undefined) ??
+      cachedAlbumList ??
       (libraryKey ? cacheGet<MediaListResponse>(libraryKey) : undefined);
     if (list?.items.length) {
       setItems(list.items);
       if (list.album?.name) setAlbumName(list.album.name);
+      if (cachedAlbumList) {
+        setListFilter(cachedAlbumList.filter);
+        setNextPageToken(cachedAlbumList.nextPageToken);
+      } else {
+        setNextPageToken(undefined);
+      }
+    } else if (!library && albumId) {
+      const fromAlbums = cachedAlbums()?.find((entry) => entry.id === albumId)
+        ?.name;
+      if (fromAlbums) setAlbumName(fromAlbums);
     }
     const hit = getCachedMedia(currentId);
     const fromList = list?.items.find((item) => item.id === currentId);
@@ -216,7 +218,7 @@ export function MediaViewer({
       const existing = cacheGet<MediaListResponse>(libraryKey);
       if (existing?.items.length) {
         setItems(existing.items);
-        setNextPageToken(undefined);
+        setNextPageToken(existing.nextPageToken);
         return;
       }
       const params = new URLSearchParams();
@@ -230,6 +232,7 @@ export function MediaViewer({
           if (cancelled) return;
           cacheSet(libraryKey, data);
           setItems(data.items);
+          setNextPageToken(data.nextPageToken);
         })
         .catch(() => {
           /* filmstrip is optional if the list cannot be loaded */
@@ -318,19 +321,42 @@ export function MediaViewer({
   }, [currentId, index, items]);
 
   useEffect(() => {
-    if (!albumId || isLibrary) return;
     if (!nextPageToken || loadingMore.current || index < 0) return;
     if (index < items.length - 4) return;
     let cancelled = false;
     loadingMore.current = true;
+
     const params = new URLSearchParams({ pageToken: nextPageToken });
-    if (listFilter === "image" || listFilter === "video") {
-      params.set("type", listFilter);
+    let url: string | undefined;
+    let mergeKey: string | undefined;
+
+    if (isLibrary && libraryKey) {
+      if (library?.type) params.set("type", library.type);
+      if (library?.collection) params.set("collection", library.collection);
+      url = `/api/library/media?${params}`;
+      mergeKey = libraryKey;
+    } else if (albumId) {
+      if (listFilter === "image" || listFilter === "video") {
+        params.set("type", listFilter);
+      }
+      url = `/api/albums/${albumId}/media?${params}`;
+      mergeKey = libraryCacheKey({ albumId, filter: listFilter });
     }
-    void apiFetch<MediaListResponse>(`/api/albums/${albumId}/media?${params}`)
+
+    if (!url || !mergeKey) {
+      loadingMore.current = false;
+      return;
+    }
+
+    void apiFetch<MediaListResponse>(url)
       .then((data) => {
         if (cancelled) return;
-        const merged = appendCachedAlbumItems(albumId, data, listFilter);
+        const merged =
+          isLibrary && libraryKey
+            ? appendCachedMediaPage(libraryKey, data)
+            : albumId
+              ? appendCachedAlbumItems(albumId, data, listFilter)
+              : appendCachedMediaPage(mergeKey, data);
         setItems(merged.items);
         setNextPageToken(merged.nextPageToken);
       })
@@ -343,7 +369,17 @@ export function MediaViewer({
     return () => {
       cancelled = true;
     };
-  }, [albumId, index, isLibrary, items.length, listFilter, nextPageToken]);
+  }, [
+    albumId,
+    index,
+    isLibrary,
+    items.length,
+    library?.collection,
+    library?.type,
+    libraryKey,
+    listFilter,
+    nextPageToken,
+  ]);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -438,11 +474,7 @@ export function MediaViewer({
     setBusy(null);
   }
 
-  const heading =
-    library?.title ??
-    albumName ??
-    cachedAlbums()?.find((album) => album.id === albumId)?.name ??
-    "Album";
+  const heading = library?.title ?? albumName ?? "Album";
   const position =
     index >= 0 && items.length > 1
       ? `${index + 1} dari ${items.length}`
