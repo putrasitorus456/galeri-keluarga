@@ -15,7 +15,6 @@ import {
   cacheGet,
   cacheIsFresh,
   cacheSet,
-  cachedAlbums,
   prefetchLibraryView,
 } from "@/lib/gallery-cache";
 import { useScrollMemory } from "@/lib/use-scroll-memory";
@@ -34,7 +33,7 @@ import {
   IconSearch,
   IconVideo,
 } from "@/components/Icons";
-import { BusyLink } from "@/components/Loading";
+import { BusyLink, useBusy } from "@/components/Loading";
 import { AlbumSkeleton, EmptyState, ErrorState } from "@/components/States";
 
 function SectionTitle({
@@ -115,50 +114,49 @@ export function HomeAlbums({
 }: {
   mode?: "home" | "all";
 }) {
-  const [albums, setAlbums] = useState<Album[] | null>(() => cachedAlbums() ?? null);
+  const [albums, setAlbums] = useState<Album[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const isAll = mode === "all";
+  const { hide } = useBusy();
   useScrollMemory(isAll ? "albums-all" : "home");
 
+  // Hanya mode lite di jalur utama — details=1 menelusuri seluruh pohon Drive
+  // dan membuat buka album terasa macet.
   const load = useCallback(async (fresh = false) => {
     if (!fresh) {
       const cached = cacheGet<AlbumsResponse>(CACHE_ALBUMS);
-      if (cached) setAlbums(cached.albums);
-      const detailed = cached?.albums.every(
-        (album) => typeof album.itemCount === "number" || !album.thumbnailUrl,
-      );
-      if (cached && cacheIsFresh(CACHE_ALBUMS) && detailed) return;
+      if (cached) {
+        setAlbums(cached.albums);
+        if (cacheIsFresh(CACHE_ALBUMS)) {
+          hide();
+          return;
+        }
+      }
     }
     setError(null);
     try {
-      if (fresh || !cacheGet(CACHE_ALBUMS)) {
-        const lite = await apiFetch<AlbumsResponse>("/api/albums");
-        if (!cacheGet(CACHE_ALBUMS) || fresh) {
-          cacheSet(CACHE_ALBUMS, lite);
-          setAlbums(lite.albums);
-        }
-        const complete = lite.albums.every(
-          (album) => typeof album.itemCount === "number" || !album.thumbnailUrl,
-        );
-        if (complete && !fresh) return;
-      }
       const data = await apiFetch<AlbumsResponse>(
-        `/api/albums?details=1${fresh ? "&fresh=1" : ""}`,
+        `/api/albums${fresh ? "?fresh=1" : ""}`,
       );
       cacheSet(CACHE_ALBUMS, data);
       setAlbums(data.albums);
     } catch (err) {
       if (!cacheGet(CACHE_ALBUMS)) setError(userMessage(err));
+    } finally {
+      hide();
     }
-  }, []);
+  }, [hide]);
 
   useLayoutEffect(() => {
     const cached = cacheGet<AlbumsResponse>(CACHE_ALBUMS);
-    if (cached) setAlbums(cached.albums);
-  }, []);
+    if (cached) {
+      setAlbums(cached.albums);
+      hide();
+    }
+  }, [hide]);
 
   useEffect(() => {
     void load(false);
@@ -166,8 +164,11 @@ export function HomeAlbums({
 
   async function refresh() {
     setRefreshing(true);
-    await load(true);
-    setRefreshing(false);
+    try {
+      await load(true);
+    } finally {
+      setRefreshing(false);
+    }
   }
 
   async function logout() {

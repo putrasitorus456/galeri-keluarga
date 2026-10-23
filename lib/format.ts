@@ -21,7 +21,11 @@ export function formatFolderCount(count: number) {
   return `${count.toLocaleString("id-ID")} folder`;
 }
 
-/** Baris keterangan kartu album: jumlah subfolder lebih dulu, lalu jumlah media. */
+/**
+ * Baris keterangan kartu album.
+ * - Tanpa subfolder: "243 item"
+ * - Ada subfolder: "2 folder dan 310 item" (item = isi langsung album, bukan isi folder anak)
+ */
 export function formatAlbumMeta(album: {
   itemCount?: number;
   folderCount?: number;
@@ -29,9 +33,11 @@ export function formatAlbumMeta(album: {
   const folders = album.folderCount ?? 0;
   const items = album.itemCount;
 
-  if (folders > 0) {
-    const label = formatFolderCount(folders);
-    return items ? `${label} \u00b7 ${formatItemCount(items)}` : label;
+  if (typeof items !== "number") {
+    return folders > 0 ? formatFolderCount(folders) : "";
   }
-  return typeof items === "number" ? items.toLocaleString("id-ID") : "";
+  if (folders > 0) {
+    return `${formatFolderCount(folders)} dan ${formatItemCount(items)}`;
+  }
+  return formatItemCount(items);
 }

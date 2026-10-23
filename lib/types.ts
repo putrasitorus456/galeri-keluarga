@@ -25,7 +25,15 @@ export type MediaItem = {
   type: MediaType;
   mimeType: string;
   thumbnailUrl: string;
+  /** CDN Drive (googleusercontent); grid memuat ini dulu, proxy sebagai fallback. */
+  remoteThumbnailUrl?: string;
+  /**
+   * Pratinjau cepat untuk viewer (thumbnail besar untuk foto; file untuk video).
+   * Untuk foto, kualitas penuh ada di `fileUrl`.
+   */
   previewUrl: string;
+  /** File asli (atau konversi HEIC→JPEG) untuk ditampilkan / diputar. */
+  fileUrl: string;
   downloadUrl: string;
   durationMs?: number;
   albumId?: string;

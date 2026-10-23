@@ -2,14 +2,19 @@ import { getSession } from "@/lib/auth";
 import { getAccessToken, getThumbnailSource, peekThumbnailLink } from "@/lib/drive";
 import { errorResponse, unauthorized } from "@/lib/http";
 import { driveThumbnailUrl, enlargeThumbnailLink } from "@/lib/heic";
+import {
+  cachedThumbResponse,
+  cacheThumbResponse,
+  readCachedThumb,
+  readMemoryThumb,
+} from "@/lib/thumb-cache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MIN_THUMB_SIZE = 100;
 const MAX_THUMB_SIZE = 2048;
-const DEFAULT_THUMB_SIZE = 400;
-const CACHE_HEADER = "private, max-age=86400, stale-while-revalidate=604800";
+const DEFAULT_THUMB_SIZE = 240;
 
 function requestedSize(request: Request) {
   const raw = Number(new URL(request.url).searchParams.get("s"));
@@ -17,11 +22,8 @@ function requestedSize(request: Request) {
   return Math.min(MAX_THUMB_SIZE, Math.max(MIN_THUMB_SIZE, Math.round(raw)));
 }
 
-const PLACEHOLDER_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
-  <rect width="400" height="400" fill="#1c1c1e"/>
-  <rect x="120" y="130" width="160" height="120" rx="12" fill="#3a3a3c"/>
-  <circle cx="168" cy="172" r="16" fill="#1c1c1e"/>
-  <polygon points="140,230 190,190 230,220 260,200 280,230" fill="#1c1c1e"/>
+const PLACEHOLDER_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240">
+  <rect width="240" height="240" fill="#1c1c1e"/>
 </svg>`;
 
 function placeholder(maxAge = 60) {
@@ -40,12 +42,16 @@ async function fetchThumb(url: string, token: string) {
   if (!res.ok) return null;
   const contentType = res.headers.get("content-type") || "image/jpeg";
   if (contentType.includes("text/html")) return null;
-  return new Response(res.body, {
-    headers: {
-      "Content-Type": contentType,
-      "Cache-Control": CACHE_HEADER,
-    },
-  });
+  return res;
+}
+
+/** Coba URL secara berurutan — hindari menggandakan QPS ke Drive. */
+async function fetchFirstThumb(urls: string[], token: string) {
+  for (const url of [...new Set(urls)]) {
+    const res = await fetchThumb(url, token);
+    if (res) return res;
+  }
+  return null;
 }
 
 export async function GET(
@@ -59,23 +65,30 @@ export async function GET(
   const size = requestedSize(request);
 
   try {
+    const hot = readMemoryThumb(id, size);
+    if (hot) return cachedThumbResponse(hot);
+
+    const cached = await readCachedThumb(id, size);
+    if (cached) return cachedThumbResponse(cached);
+
     const token = await getAccessToken();
     const remembered = peekThumbnailLink(id);
-    const fromMemory = remembered
-      ? await fetchThumb(enlargeThumbnailLink(remembered, size), token)
-      : null;
-    if (fromMemory) return fromMemory;
+    const candidates = [
+      remembered ? enlargeThumbnailLink(remembered, size) : null,
+      driveThumbnailUrl(id, size),
+    ].filter((url): url is string => Boolean(url));
 
-    const direct = await fetchThumb(driveThumbnailUrl(id, size), token);
-    if (direct) return direct;
+    const fast = await fetchFirstThumb(candidates, token);
+    if (fast) return cacheThumbResponse(id, size, fast);
 
+    // Fallback mahal: metadata Drive — hanya jika keduanya gagal.
     const source = await getThumbnailSource(id);
     if (source.thumbnailLink) {
       const fromMeta = await fetchThumb(
         enlargeThumbnailLink(source.thumbnailLink, size),
         token,
       );
-      if (fromMeta) return fromMeta;
+      if (fromMeta) return cacheThumbResponse(id, size, fromMeta);
     }
 
     return placeholder(300);

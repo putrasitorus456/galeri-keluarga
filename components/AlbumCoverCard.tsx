@@ -3,7 +3,7 @@
 import { albumCoverClass } from "@/components/BrandMark";
 import { IconFolder, IconPhoto } from "@/components/Icons";
 import { BusyLink, ThumbImage } from "@/components/Loading";
-import { formatAlbumMeta } from "@/lib/format";
+import { formatAlbumMeta, formatItemCount } from "@/lib/format";
 import { prefetchAlbum, prefetchLibraryView } from "@/lib/gallery-cache";
 import type { Album } from "@/lib/types";
 
@@ -119,7 +119,7 @@ export function CollageCard({
         {title}
       </span>
       <span className="mt-0.5 w-full truncate text-center text-[12px] leading-tight text-muted">
-        {typeof count === "number" ? count.toLocaleString("id-ID") : "\u00a0"}
+        {typeof count === "number" ? formatItemCount(count) : "\u00a0"}
       </span>
     </BusyLink>
   );

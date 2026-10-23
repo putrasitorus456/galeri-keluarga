@@ -16,53 +16,71 @@ import {
   localFileResponse,
   nodeStreamToWeb,
 } from "@/lib/stream";
-import { getPlayableVideo, mp4PreviewName } from "@/lib/video";
+import {
+  cachedThumbResponse,
+  cacheThumbResponse,
+  readCachedThumb,
+  writeCachedThumb,
+} from "@/lib/thumb-cache";
+import {
+  getCachedPlayableVideo,
+  getPlayableVideo,
+  mp4PreviewName,
+} from "@/lib/video";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
+/** Bucket cache terpisah dari thumbnail Drive agar hasil konversi penuh tidak tercampur. */
+const HEIC_FULL_CACHE_KEY = 4096;
+const HEIC_FALLBACK_SIZE = 2048;
+
 async function heicPreviewResponse(
   id: string,
   meta: { name: string; thumbnailLink: string | null },
 ) {
-  const token = await getAccessToken();
-  if (meta.thumbnailLink) {
-    const thumb = await fetch(enlargeThumbnailLink(meta.thumbnailLink, 2048), {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (thumb.ok && !thumb.headers.get("content-type")?.includes("text/html")) {
-      return new Response(thumb.body, {
-        headers: {
-          "Content-Type": thumb.headers.get("content-type") || "image/jpeg",
-          "Cache-Control": "private, max-age=86400, stale-while-revalidate=604800",
-          "Content-Disposition": contentDisposition(
-            jpegPreviewName(meta.name),
-            true,
-          ),
-        },
-      });
-    }
+  const disposition = contentDisposition(jpegPreviewName(meta.name), true);
+  const cached = await readCachedThumb(id, HEIC_FULL_CACHE_KEY);
+  if (cached) {
+    const res = cachedThumbResponse(cached);
+    res.headers.set("Content-Disposition", disposition);
+    return res;
   }
 
+  // Utamakan konversi file asli (kualitas penuh). Thumbnail Drive hanya cadangan
+  // bila konversi gagal — viewer sudah menampilkan pratinjau sambil menunggu.
   try {
     const { stream } = await getFileStream(id, null, { alreadyVerified: true });
     const jpeg = await convertHeicStreamToJpeg(stream);
+    void writeCachedThumb(id, HEIC_FULL_CACHE_KEY, jpeg, "image/jpeg");
     return new Response(new Uint8Array(jpeg), {
       headers: {
         "Content-Type": "image/jpeg",
-        "Cache-Control": "private, max-age=3600",
+        "Cache-Control": "private, max-age=86400, stale-while-revalidate=604800",
         "Content-Length": String(jpeg.length),
-        "Content-Disposition": contentDisposition(
-          jpegPreviewName(meta.name),
-          true,
-        ),
+        "Content-Disposition": disposition,
       },
     });
   } catch (err) {
-    console.error("HEIC preview conversion failed", err);
-    throw err;
+    console.error("HEIC full conversion failed, falling back to Drive thumb", err);
   }
+
+  const token = await getAccessToken();
+  if (meta.thumbnailLink) {
+    const thumb = await fetch(
+      enlargeThumbnailLink(meta.thumbnailLink, HEIC_FALLBACK_SIZE),
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (thumb.ok && !thumb.headers.get("content-type")?.includes("text/html")) {
+      // Jangan tulis ke HEIC_FULL_CACHE_KEY — itu khusus hasil konversi penuh.
+      const res = cacheThumbResponse(id, HEIC_FALLBACK_SIZE, thumb);
+      res.headers.set("Content-Disposition", disposition);
+      return res;
+    }
+  }
+
+  throw new Error("HEIC preview unavailable");
 }
 
 async function streamMedia(request: Request, id: string) {
@@ -82,6 +100,19 @@ async function streamMedia(request: Request, id: string) {
       mediaUrl.searchParams.get("transcode") === "1" &&
       meta.mimeType.startsWith("video/");
     if (wantsMp4) {
+      if (
+        mediaUrl.searchParams.get("prepare") === "1" &&
+        mediaUrl.searchParams.get("check") === "1"
+      ) {
+        const cached = await getCachedPlayableVideo(id);
+        return Response.json(
+          cached
+            ? { ready: true, size: cached.size }
+            : { ready: false },
+          { headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
       const playable = await getPlayableVideo(id, meta.size);
       if (mediaUrl.searchParams.get("prepare") === "1") {
         return Response.json(

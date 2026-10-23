@@ -1,13 +1,20 @@
 export const THUMB = {
   strip: 200,
-  grid: 400,
-  cover: 400,
+  /** Cukup tajam untuk sel grid; jauh lebih ringan dari 400. */
+  grid: 240,
+  cover: 360,
   poster: 800,
-  view: 1600,
+  /** Pratinjau tajam untuk viewer sambil file asli masih diunduh. */
+  view: 2048,
 } as const;
 
 export function thumbUrl(id: string, size: number = THUMB.grid) {
   return `/api/media/${id}/thumbnail?s=${size}`;
+}
+
+/** Stream file media (foto asli / video) lewat proxy Drive. */
+export function fileUrl(id: string) {
+  return `/api/media/${id}/file`;
 }
 
 export function sizedThumb(url: string | undefined, size: number) {

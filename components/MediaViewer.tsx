@@ -12,8 +12,14 @@ import {
   findCachedAlbumList,
   getCachedMedia,
   libraryCacheKey,
+  videoNeedsTranscode,
+  preloadOriginal,
   warmMedia,
 } from "@/lib/gallery-cache";
+import {
+  browserNeedsVideoTranscode,
+  prepareTranscodedPreview,
+} from "@/lib/playback";
 import { shareMedia } from "@/lib/share-download";
 import type {
   LibraryKind,
@@ -27,7 +33,7 @@ import { useDownloadFlow } from "@/components/DownloadPopup";
 import { IconChevron, IconDownload, IconShare } from "@/components/Icons";
 import { MediaFilmstrip } from "@/components/MediaFilmstrip";
 import { MediaStage } from "@/components/MediaStage";
-import { Spinner, useBusy } from "@/components/Loading";
+import { LoadingPanel, Spinner, useBusy } from "@/components/Loading";
 import { ErrorState } from "@/components/States";
 
 const SWIPE_PX = 56;
@@ -88,6 +94,7 @@ export function MediaViewer({
   const loadingMore = useRef(false);
   const pendingTo = useRef<string | null>(null);
   const openedId = useRef(mediaId);
+  const neighborPrepareGen = useRef(0);
   const drag = useRef({
     tracking: false,
     captured: false,
@@ -104,6 +111,32 @@ export function MediaViewer({
   const prevItem = index > 0 ? items[index - 1] : undefined;
   const nextItem = index >= 0 ? items[index + 1] : undefined;
   const currentItem = (index >= 0 ? items[index] : undefined) ?? media;
+
+  useEffect(() => {
+    neighborPrepareGen.current += 1;
+  }, [index]);
+
+  const onPlaybackReady = useCallback(() => {
+    const gen = ++neighborPrepareGen.current;
+    const neighbors = [items[index - 1], items[index + 1]];
+    void (async () => {
+      for (const item of neighbors) {
+        if (gen !== neighborPrepareGen.current) return;
+        if (!item || item.type !== "video") continue;
+        if (
+          !browserNeedsVideoTranscode(item.mimeType) &&
+          !videoNeedsTranscode(item.id)
+        ) {
+          continue;
+        }
+        try {
+          await prepareTranscodedPreview(item.previewUrl);
+        } catch {
+          /* neighbor prepare is best-effort */
+        }
+      }
+    })();
+  }, [index, items]);
 
   const commit = useCallback(
     (id: string) => {
@@ -156,6 +189,11 @@ export function MediaViewer({
     openedId.current = mediaId;
     setCurrentId(mediaId);
   }, [mediaId]);
+
+  // Tutup overlay "Membuka kenangan" dari BusyLink begitu item siap ditampilkan.
+  useEffect(() => {
+    if (currentItem || error) hide();
+  }, [currentItem, error, hide]);
 
   useLayoutEffect(() => {
     const list =
@@ -272,9 +310,12 @@ export function MediaViewer({
   useEffect(() => {
     const neighbors = [items[index], items[index - 1], items[index + 1]];
     for (const item of neighbors) {
-      if (item) warmMedia(item);
+      if (!item) continue;
+      warmMedia(item);
+      // File asli hanya untuk foto yang sedang dibuka — hemat bandwidth.
+      if (item.id === currentId) preloadOriginal(item);
     }
-  }, [index, items]);
+  }, [currentId, index, items]);
 
   useEffect(() => {
     if (!albumId || isLibrary) return;
@@ -449,9 +490,7 @@ export function MediaViewer({
         {error ? (
           <ErrorState message={error} />
         ) : !currentItem ? (
-          <div className="flex flex-1 items-center justify-center">
-            <Spinner size="lg" />
-          </div>
+          <LoadingPanel label="Memuat kenangan" />
         ) : (
           <>
             <div
@@ -476,7 +515,12 @@ export function MediaViewer({
                   ) : null}
                 </div>
                 <div className="h-full w-1/3">
-                  <MediaStage key={currentItem.id} item={currentItem} active />
+                  <MediaStage
+                    key={currentItem.id}
+                    item={currentItem}
+                    active
+                    onPlaybackReady={onPlaybackReady}
+                  />
                 </div>
                 <div className="h-full w-1/3">
                   {nextItem ? (

@@ -16,21 +16,31 @@ import {
 import type { MediaItem } from "@/lib/types";
 import { useDownloadFlow } from "@/components/DownloadPopup";
 import { IconDownload } from "@/components/Icons";
-import { Spinner, StatusCopy } from "@/components/Loading";
+import { LoadingMark, Spinner, StatusCopy } from "@/components/Loading";
 
 export function MediaStage({
   item,
   active,
+  onPlaybackReady,
 }: {
   item: MediaItem;
   active: boolean;
+  onPlaybackReady?: () => void;
 }) {
   return (
     <div className="relative flex h-full w-full items-center justify-center">
       {item.type === "video" ? (
-        <VideoStage item={item} active={active} />
+        <VideoStage
+          item={item}
+          active={active}
+          onPlaybackReady={onPlaybackReady}
+        />
       ) : (
-        <ImageStage item={item} active={active} />
+        <ImageStage
+          item={item}
+          active={active}
+          onPlaybackReady={onPlaybackReady}
+        />
       )}
     </div>
   );
@@ -82,10 +92,19 @@ function initialVideoSource(item: MediaItem): VideoSource {
   return "original";
 }
 
-function VideoStage({ item, active }: { item: MediaItem; active: boolean }) {
+function VideoStage({
+  item,
+  active,
+  onPlaybackReady,
+}: {
+  item: MediaItem;
+  active: boolean;
+  onPlaybackReady?: () => void;
+}) {
   const { download, downloading, popup } = useDownloadFlow();
   const videoRef = useRef<HTMLVideoElement>(null);
   const convertedErrors = useRef(0);
+  const notifiedReady = useRef(false);
   const [source, setSource] = useState<VideoSource>(() =>
     active ? initialVideoSource(item) : "original",
   );
@@ -98,6 +117,7 @@ function VideoStage({ item, active }: { item: MediaItem; active: boolean }) {
 
   useEffect(() => {
     convertedErrors.current = 0;
+    notifiedReady.current = false;
     setSource(active ? initialVideoSource(item) : "original");
     setReady(!active || wasMediaOpened(item.id));
     setConvertedUrl(null);
@@ -132,6 +152,10 @@ function VideoStage({ item, active }: { item: MediaItem; active: boolean }) {
   function markReady() {
     setReady(true);
     markMediaOpened(item.id);
+    if (!notifiedReady.current) {
+      notifiedReady.current = true;
+      onPlaybackReady?.();
+    }
   }
 
   function handleError() {
@@ -213,13 +237,14 @@ function VideoStage({ item, active }: { item: MediaItem; active: boolean }) {
         <Overlay thumbnailUrl={item.thumbnailUrl}>
           {active ? (
             <>
-              <Spinner size="lg" />
+              <LoadingMark size="lg" />
               <StatusCopy
                 label={
                   source === "converted"
                     ? "Menyiapkan video"
                     : "Memuat pratinjau"
                 }
+                hint="Mohon tunggu sebentar"
               />
             </>
           ) : null}
@@ -249,32 +274,116 @@ function VideoStage({ item, active }: { item: MediaItem; active: boolean }) {
   );
 }
 
-function ImageStage({ item, active }: { item: MediaItem; active: boolean }) {
+function mediaFileUrl(item: MediaItem) {
+  return item.fileUrl || `/api/media/${item.id}/file`;
+}
+
+/** Offset pojok kanan-atas isi foto di dalam elemen `object-contain`. */
+function containContentInset(img: HTMLImageElement) {
+  const { clientWidth: cw, clientHeight: ch, naturalWidth: nw, naturalHeight: nh } =
+    img;
+  if (!cw || !ch || !nw || !nh) return null;
+  const scale = Math.min(cw / nw, ch / nh);
+  const drawnW = nw * scale;
+  const drawnH = nh * scale;
+  return {
+    top: (ch - drawnH) / 2,
+    right: (cw - drawnW) / 2,
+  };
+}
+
+function ImageStage({
+  item,
+  active,
+  onPlaybackReady,
+}: {
+  item: MediaItem;
+  active: boolean;
+  onPlaybackReady?: () => void;
+}) {
+  const notifiedReady = useRef(false);
+  const frameRef = useRef<HTMLImageElement>(null);
   const cached = getCachedPreviewUrl(item.id);
-  const [hiRes, setHiRes] = useState<string | null>(
+  const [previewSrc, setPreviewSrc] = useState<string | null>(
     () => cached ?? (active ? item.previewUrl : null),
   );
-  const [hiReady, setHiReady] = useState(
+  const [previewReady, setPreviewReady] = useState(
     () => Boolean(cached) || wasMediaOpened(item.id),
+  );
+  const [fullSrc, setFullSrc] = useState<string | null>(
+    () => (active ? mediaFileUrl(item) : null),
+  );
+  const [fullReady, setFullReady] = useState(false);
+  const [badgeInset, setBadgeInset] = useState<{ top: number; right: number } | null>(
+    null,
+  );
+  const showOpenSpinner = useDelayedFlag(active && !previewReady, 280);
+  const showHdBadge = useDelayedFlag(
+    active && previewReady && Boolean(fullSrc) && !fullReady,
+    400,
   );
 
   useEffect(() => {
+    notifiedReady.current = false;
+    setFullReady(false);
+
     const blobUrl = getCachedPreviewUrl(item.id);
     if (blobUrl) {
-      setHiRes(blobUrl);
-      setHiReady(true);
+      setPreviewSrc(blobUrl);
+      setPreviewReady(true);
       markMediaOpened(item.id);
+    } else if (active) {
+      setPreviewSrc(item.previewUrl);
+      setPreviewReady(wasMediaOpened(item.id));
+    } else {
+      setPreviewSrc(null);
+      setPreviewReady(false);
+    }
+
+    // File asli hanya untuk slide aktif — tetangga cukup pratinjau.
+    setFullSrc(active ? mediaFileUrl(item) : null);
+  }, [active, item, item.id, item.previewUrl, item.fileUrl]);
+
+  useEffect(() => {
+    if (!active || !previewReady || notifiedReady.current) return;
+    notifiedReady.current = true;
+    onPlaybackReady?.();
+  }, [active, previewReady, onPlaybackReady]);
+
+  useEffect(() => {
+    const img = frameRef.current;
+    if (!img || !showHdBadge) {
+      setBadgeInset(null);
       return;
     }
-    if (active) setHiRes(item.previewUrl);
-  }, [active, item.id, item.previewUrl]);
 
-  const previewSrc = hiRes;
+    function measure() {
+      const el = frameRef.current;
+      if (!el) return;
+      const inset = containContentInset(el);
+      if (inset) setBadgeInset(inset);
+    }
+
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(img);
+    img.addEventListener("load", measure);
+    return () => {
+      ro.disconnect();
+      img.removeEventListener("load", measure);
+    };
+  }, [showHdBadge, previewSrc, item.thumbnailUrl, previewReady]);
+
+  function markPreviewReady() {
+    setPreviewReady(true);
+    markMediaOpened(item.id);
+  }
 
   return (
     <>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
+        ref={frameRef}
         src={item.thumbnailUrl}
         alt=""
         draggable={false}
@@ -286,17 +395,52 @@ function ImageStage({ item, active }: { item: MediaItem; active: boolean }) {
           src={previewSrc}
           alt={item.name}
           draggable={false}
+          className={`absolute inset-0 h-full w-full object-contain ${
+            previewReady ? "opacity-100" : "opacity-0"
+          }`}
+          fetchPriority={active && !fullReady ? "high" : "low"}
+          decoding="async"
+          onLoad={markPreviewReady}
+          onError={markPreviewReady}
+        />
+      ) : null}
+      {fullSrc ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={fullSrc}
+          alt={item.name}
+          draggable={false}
           className={`relative h-full w-full object-contain ${
-            hiReady ? "opacity-100" : "opacity-0"
+            fullReady ? "opacity-100" : "opacity-0"
           }`}
           fetchPriority={active ? "high" : "low"}
           decoding="async"
-          onLoad={() => {
-            setHiReady(true);
-            markMediaOpened(item.id);
-          }}
-          onError={() => setHiReady(true)}
+          onLoad={() => setFullReady(true)}
+          onError={() => setFullReady(true)}
         />
+      ) : null}
+      {showOpenSpinner ? (
+        <Overlay thumbnailUrl={item.thumbnailUrl}>
+          <LoadingMark size="lg" />
+          <StatusCopy label="Memuat foto" hint="Mohon tunggu sebentar" />
+        </Overlay>
+      ) : null}
+      {showHdBadge && badgeInset ? (
+        <div
+          className="pointer-events-none absolute z-20"
+          style={{
+            top: badgeInset.top + 8,
+            right: badgeInset.right + 8,
+          }}
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+        >
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-black/65 px-2.5 py-1.5 text-[12px] font-medium tracking-tight text-white shadow-lg backdrop-blur-sm">
+            <Spinner size="sm" />
+            Memuat HD
+          </span>
+        </div>
       ) : null}
     </>
   );

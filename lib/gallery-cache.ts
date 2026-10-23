@@ -28,12 +28,19 @@ const previewPending = new Map<string, Promise<string>>();
 const openedIds = new Set<string>();
 const prefetching = new Set<string>();
 
-export const CACHE_ALBUMS = "albums";
+export const CACHE_ALBUMS = "albums-v2";
 
 function readTranscodedIds() {
-  if (typeof sessionStorage === "undefined") return new Set<string>();
+  if (typeof window === "undefined") return new Set<string>();
   try {
-    const raw = sessionStorage.getItem(TRANSCODE_STORE);
+    let raw = localStorage.getItem(TRANSCODE_STORE);
+    if (!raw) {
+      raw = sessionStorage.getItem(TRANSCODE_STORE);
+      if (raw) {
+        localStorage.setItem(TRANSCODE_STORE, raw);
+        sessionStorage.removeItem(TRANSCODE_STORE);
+      }
+    }
     const parsed = raw ? (JSON.parse(raw) as unknown) : [];
     if (!Array.isArray(parsed)) return new Set<string>();
     return new Set(parsed.filter((id): id is string => typeof id === "string"));
@@ -152,7 +159,7 @@ export function wasMediaOpened(id: string) {
 export function markVideoNeedsTranscode(id: string) {
   transcodedIds.add(id);
   try {
-    sessionStorage.setItem(TRANSCODE_STORE, JSON.stringify([...transcodedIds]));
+    localStorage.setItem(TRANSCODE_STORE, JSON.stringify([...transcodedIds]));
   } catch {
     /* quota — memory set still works */
   }
@@ -224,10 +231,23 @@ export async function rememberPreview(id: string, src: string) {
   return job;
 }
 
+/** Prefetch preview foto saja — jangan pre-transcode video (itu mengunci server). */
 export function warmMedia(item: MediaItem) {
   if (item.type === "image") {
     void rememberPreview(item.id, item.previewUrl);
   }
+}
+
+/**
+ * Mulai unduh file asli foto sedini mungkin (pointerdown / hover buka).
+ * Mengandalkan cache HTTP browser — tidak menaruh blob besar di memori.
+ */
+export function preloadOriginal(item: MediaItem) {
+  if (item.type !== "image" || typeof window === "undefined") return;
+  const src = item.fileUrl || `/api/media/${item.id}/file`;
+  const img = new Image();
+  img.decoding = "async";
+  img.src = src;
 }
 
 export function cacheClear() {
@@ -237,6 +257,9 @@ export function cacheClear() {
   transcodedIds.clear();
   prefetching.clear();
   memory.clear();
+  if (typeof localStorage !== "undefined") {
+    localStorage.removeItem(TRANSCODE_STORE);
+  }
   if (typeof sessionStorage !== "undefined") {
     sessionStorage.removeItem(TRANSCODE_STORE);
     const keys: string[] = [];

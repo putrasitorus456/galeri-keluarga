@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { iconBtnClass } from "@/components/Chrome";
 import { IconBack } from "@/components/Icons";
+import { useBusy } from "@/components/Loading";
 
 type HeaderProps = {
   title: string;
@@ -15,6 +16,7 @@ type HeaderProps = {
 
 function BackButton({ href }: { href: string }) {
   const router = useRouter();
+  const { go, show } = useBusy();
 
   return (
     <button
@@ -22,8 +24,13 @@ function BackButton({ href }: { href: string }) {
       aria-label="Kembali"
       className={iconBtnClass}
       onClick={() => {
-        if (window.history.length > 1) router.back();
-        else router.push(href);
+        // Sama seperti BusyLink: overlay hold sampai halaman tujuan memanggil hide().
+        if (window.history.length > 1) {
+          show("Memuat", { hold: true });
+          router.back();
+        } else {
+          go(href);
+        }
       }}
     >
       <IconBack className="h-6 w-6" />

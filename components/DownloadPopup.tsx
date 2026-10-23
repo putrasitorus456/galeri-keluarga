@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { downloadMedia, sleep } from "@/lib/share-download";
 import type { MediaItem } from "@/lib/types";
 import { IconCheck } from "@/components/Icons";
-import { Spinner } from "@/components/Loading";
+import { LoadingMark } from "@/components/Loading";
 
 type MediaKinds = "image" | "video" | "mixed";
 
@@ -235,10 +235,7 @@ function DownloadPopup({
       >
         {state.phase === "loading" ? (
           <>
-            <span className="relative mx-auto flex h-16 w-16 items-center justify-center">
-              <span className="absolute inset-0 rounded-full bg-white/8" />
-              <Spinner size="lg" />
-            </span>
+            <LoadingMark size="lg" className="mx-auto" />
             <h2
               id={titleId}
               className="mt-5 text-[17px] font-semibold tracking-tight text-white"

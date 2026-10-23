@@ -1,19 +1,28 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { apiFetch, userMessage } from "@/lib/api-client";
 import { MESSAGES } from "@/lib/errors";
 import { formatDuration, formatFolderCount, formatItemCount } from "@/lib/format";
 import {
+  appendCachedAlbumItems,
   cacheClear,
   cacheGet,
   cacheIsFresh,
+  cachedAlbums,
+  cacheMedia,
   cacheMediaList,
   cacheSet,
   libraryCacheKey,
   prefetchAlbum,
+  videoNeedsTranscode,
+  preloadOriginal,
   warmMedia,
 } from "@/lib/gallery-cache";
+import {
+  browserNeedsVideoTranscode,
+  prepareTranscodedPreview,
+} from "@/lib/playback";
 import { useLongPress } from "@/lib/use-long-press";
 import { useScrollMemory } from "@/lib/use-scroll-memory";
 import type {
@@ -28,8 +37,8 @@ import { AppHeader } from "@/components/AppHeader";
 import { ActionMenu, BottomDock, IconButton } from "@/components/Chrome";
 import { useDownloadFlow } from "@/components/DownloadPopup";
 import { IconCheck, IconChevron, IconDownload, IconLogout, IconPlay, IconRefresh, IconSort } from "@/components/Icons";
-import { BusyLink, Spinner, ThumbImage } from "@/components/Loading";
-import { EmptyState, ErrorState, MediaSkeleton } from "@/components/States";
+import { BusyLink, LoadingPanel, Spinner, ThumbImage, useBusy } from "@/components/Loading";
+import { EmptyState, ErrorState } from "@/components/States";
 
 type Filter = "all" | MediaType;
 
@@ -75,6 +84,7 @@ type LibraryOptions = {
 function MediaTile({
   item,
   href,
+  albumId,
   eager,
   selectMode,
   selected,
@@ -83,6 +93,7 @@ function MediaTile({
 }: {
   item: MediaItem;
   href: string;
+  albumId?: string;
   eager: boolean;
   selectMode: boolean;
   selected: boolean;
@@ -105,10 +116,29 @@ function MediaTile({
     if (selectMode && !afterLongPress) onToggle();
   }
 
+  function prepareOpen() {
+    if (selectMode) return;
+    cacheMedia(item, albumId ?? item.albumId);
+    warmMedia(item);
+    preloadOriginal(item);
+  }
+
+  /** Start convert early on press — not hover, to avoid locking the encode slot. */
+  function prepareVideoOpen() {
+    prepareOpen();
+    if (
+      item.type === "video" &&
+      (browserNeedsVideoTranscode(item.mimeType) || videoNeedsTranscode(item.id))
+    ) {
+      void prepareTranscodedPreview(item.previewUrl);
+    }
+  }
+
   const inner = (
     <>
       <ThumbImage
         src={item.thumbnailUrl}
+        remoteSrc={item.remoteThumbnailUrl}
         alt={item.name}
         eager={eager}
         className="h-full w-full object-cover"
@@ -146,12 +176,8 @@ function MediaTile({
         role={selectMode ? "button" : undefined}
         aria-pressed={selectMode ? selected : undefined}
         aria-label={selectMode ? `Pilih ${item.name}` : undefined}
-        onPointerDown={() => {
-          if (!selectMode) warmMedia(item);
-        }}
-        onPointerEnter={() => {
-          if (!selectMode) warmMedia(item);
-        }}
+        onPointerDown={prepareVideoOpen}
+        onPointerEnter={prepareOpen}
         className="absolute inset-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
       >
         {inner}
@@ -174,7 +200,6 @@ export function AlbumView({
     collection: library?.collection,
     filter: albumId ? filter : undefined,
   });
-  const cached = cacheGet<MediaListResponse>(cacheKey);
 
   useScrollMemory(
     albumId
@@ -182,30 +207,33 @@ export function AlbumView({
       : `lib:${library?.type ?? "all"}:${library?.collection ?? "all"}`,
   );
 
+  // SSR-safe defaults; sessionStorage cache is applied in useLayoutEffect.
   const [album, setAlbum] = useState<Album | null>(
-    cached?.album ?? (library ? { id: "library", name: library.title } : null),
+    library ? { id: "library", name: library.title } : null,
   );
-  const [subAlbums, setSubAlbums] = useState<Album[]>(cached?.subAlbums ?? []);
-  const [breadcrumb, setBreadcrumb] = useState<AlbumCrumb[]>(
-    cached?.breadcrumb ?? [],
-  );
-  const [items, setItems] = useState<MediaItem[]>(cached?.items ?? []);
-  const [nextPageToken, setNextPageToken] = useState<string | undefined>(
-    cached?.nextPageToken,
-  );
-  const [total, setTotal] = useState<number | undefined>(cached?.total);
+  const [subAlbums, setSubAlbums] = useState<Album[]>([]);
+  const [breadcrumb, setBreadcrumb] = useState<AlbumCrumb[]>([]);
+  const [items, setItems] = useState<MediaItem[]>([]);
+  const [nextPageToken, setNextPageToken] = useState<string | undefined>();
+  const [total, setTotal] = useState<number | undefined>();
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(!cached);
+  const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filterOpen, setFilterOpen] = useState(false);
   const { download, downloading, popup } = useDownloadFlow();
+  const { hide } = useBusy();
+  const loadMoreLock = useRef(false);
 
   const load = useCallback(
     async (
-      opts: { fresh?: boolean; pageToken?: string; append?: boolean } = {},
+      opts: {
+        fresh?: boolean;
+        pageToken?: string;
+        append?: boolean;
+      } = {},
     ) => {
       const { fresh, pageToken, append } = opts;
       setError(null);
@@ -237,11 +265,20 @@ export function AlbumView({
           append ? [...current, ...data.items] : data.items,
         );
         setNextPageToken(data.nextPageToken);
-        setTotal(data.total);
+        // Jangan hapus total album saat "muat lainnya" (halaman berikutnya tanpa total).
+        setTotal((prev) =>
+          data.total !== undefined ? data.total : append ? prev : undefined,
+        );
         if (!append) cacheSet(cacheKey, data);
-        else cacheMediaList(data.items, albumId);
+        else if (albumId) {
+          appendCachedAlbumItems(albumId, data, filter);
+        } else {
+          cacheMediaList(data.items, albumId);
+        }
+        return data;
       } catch (err) {
         setError(userMessage(err));
+        return null;
       }
     },
     [albumId, cacheKey, filter, library?.collection, library?.title, library?.type],
@@ -249,34 +286,63 @@ export function AlbumView({
 
   useLayoutEffect(() => {
     setSelected(new Set());
+    const listAlbum = albumId
+      ? cachedAlbums()?.find((entry) => entry.id === albumId)
+      : undefined;
+    // Kartu list punya total isi langsung; jangan dipakai saat filter foto/video.
+    const listCount = filter === "all" ? listAlbum?.itemCount : undefined;
     const existing = cacheGet<MediaListResponse>(cacheKey);
     if (existing) {
-      setAlbum(
-        existing.album ?? {
-          id: "library",
-          name: library?.title ?? "Album",
-        },
-      );
+      const seedAlbum = existing.album ?? listAlbum ?? {
+        id: "library",
+        name: library?.title ?? "Album",
+      };
+      setAlbum(seedAlbum);
       setSubAlbums(existing.subAlbums ?? []);
       setBreadcrumb(existing.breadcrumb ?? []);
       setItems(existing.items);
       setNextPageToken(existing.nextPageToken);
-      setTotal(existing.total);
+      // Cache lama: total sering = PAGE_SIZE (50) atau panjang halaman terakhir.
+      const pageSizedTotal =
+        Boolean(existing.nextPageToken) &&
+        existing.total === existing.items.length;
+      setTotal(
+        pageSizedTotal
+          ? (listCount ?? seedAlbum.itemCount ?? existing.total)
+          : (existing.total ?? listCount ?? seedAlbum.itemCount),
+      );
       setLoading(false);
-      if (cacheIsFresh(cacheKey)) return;
-    } else {
-      setLoading(true);
-      setSubAlbums([]);
-      setBreadcrumb([]);
-      setItems([]);
+      hide();
+      const needsRecount =
+        existing.total === undefined || pageSizedTotal;
+      if (cacheIsFresh(cacheKey) && !needsRecount) return;
+      void load({});
+      return;
     }
-    void load({}).finally(() => setLoading(false));
-  }, [cacheKey, library?.title, load]);
+
+    setLoading(true);
+    setSubAlbums([]);
+    setBreadcrumb([]);
+    setItems([]);
+    if (listAlbum) {
+      setAlbum(listAlbum);
+      if (listCount !== undefined) setTotal(listCount);
+    }
+    void load({})
+      .catch(() => undefined)
+      .finally(() => {
+        setLoading(false);
+        hide();
+      });
+  }, [albumId, cacheKey, filter, hide, library?.title, load]);
 
   async function refresh() {
     setRefreshing(true);
-    await load({ fresh: true });
-    setRefreshing(false);
+    try {
+      await load({ fresh: true });
+    } finally {
+      setRefreshing(false);
+    }
   }
 
   async function logout() {
@@ -286,10 +352,15 @@ export function AlbumView({
   }
 
   async function loadMore() {
-    if (!nextPageToken || loadingMore) return;
+    if (!nextPageToken || loadingMore || loadMoreLock.current) return;
+    loadMoreLock.current = true;
     setLoadingMore(true);
-    await load({ pageToken: nextPageToken, append: true });
-    setLoadingMore(false);
+    try {
+      await load({ pageToken: nextPageToken, append: true });
+    } finally {
+      setLoadingMore(false);
+      loadMoreLock.current = false;
+    }
   }
 
   /** Tekan-tahan sebuah media: masuk mode pilih dengan item itu sudah tertandai. */
@@ -329,17 +400,13 @@ export function AlbumView({
   const showDock = Boolean(library) && !selectMode;
   const ancestors = breadcrumb.slice(0, -1);
   const parentAlbumId = ancestors.at(-1)?.id;
-  const mediaCount = total ?? items.length;
+  // Samakan dengan kartu list: total isi langsung album, bukan items yang sudah di-load.
+  const mediaCount = total ?? album?.itemCount ?? items.length;
   const subtitle = loading
     ? "Memuat..."
-    : [
-        subAlbums.length > 0 ? formatFolderCount(subAlbums.length) : null,
-        mediaCount > 0 || subAlbums.length === 0
-          ? formatItemCount(mediaCount, kind)
-          : null,
-      ]
-        .filter(Boolean)
-        .join(" \u00b7 ");
+    : subAlbums.length > 0
+      ? `${formatFolderCount(subAlbums.length)} dan ${formatItemCount(mediaCount, kind)}`
+      : formatItemCount(mediaCount, kind);
   const showFolders = subAlbums.length > 0 && !selectMode;
   const isEmpty = items.length === 0 && subAlbums.length === 0;
 
@@ -432,7 +499,10 @@ export function AlbumView({
             onRetry={() => void load({ fresh: true })}
           />
         ) : loading && isEmpty ? (
-          <MediaSkeleton />
+          <LoadingPanel
+            label="Memuat album"
+            hint="Mengambil kenangan dari Drive"
+          />
         ) : isEmpty ? (
           <EmptyState
             message={
@@ -465,6 +535,7 @@ export function AlbumView({
                 <MediaTile
                   key={item.id}
                   item={item}
+                  albumId={albumId}
                   href={
                     library?.basePath
                       ? `${library.basePath}/${item.id}`
@@ -472,7 +543,7 @@ export function AlbumView({
                         ? `/album/${item.albumId ?? albumId}/${item.id}`
                         : `/m/${item.id}`
                   }
-                  eager={index < 12}
+                  eager={index < 18}
                   selectMode={selectMode}
                   selected={selected.has(item.id)}
                   onToggle={() => toggleSelect(item.id)}

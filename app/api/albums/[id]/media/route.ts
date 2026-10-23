@@ -1,6 +1,7 @@
 import { getSession } from "@/lib/auth";
 import { getAlbumWithMedia } from "@/lib/drive";
 import { cachedJson, errorResponse, unauthorized } from "@/lib/http";
+import { warmAlbumGridThumbs } from "@/lib/thumb-warm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,6 +23,8 @@ export async function GET(
 
   try {
     const result = await getAlbumWithMedia(id, pageToken, typeFilter, fresh);
+    // Warm proxy cache untuk viewport awal — tidak menunda JSON.
+    if (!pageToken) warmAlbumGridThumbs(result.items);
     return cachedJson(result, 20);
   } catch (err) {
     return errorResponse(err);

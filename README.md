@@ -73,6 +73,8 @@ Service worker PWA hanya aktif di production (`npm run build` lalu `npm run star
 
 Railway (atau Fly.io / VPS) lebih cocok daripada Vercel Hobby karena video di-stream lewat server.
 
+Untuk cache thumbnail dan video hasil konversi yang bertahan antar deploy, pasang volume disk lalu set `THUMB_CACHE_DIR` dan `VIDEO_CACHE_DIR` ke path volume itu. Tanpa itu, cache tersimpan di `.data/` di dalam container (hilang saat redeploy).
+
 Setelah domain HTTPS aktif, orang tua bisa membuka situs lalu **Tambahkan ke layar utama** di Chrome Android.
 
 ## Perintah

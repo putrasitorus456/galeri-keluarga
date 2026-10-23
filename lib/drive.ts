@@ -4,7 +4,8 @@ import { google, type drive_v3 } from "googleapis";
 import { revalidateTag, unstable_cache } from "next/cache";
 import { AppError, MESSAGES } from "@/lib/errors";
 import { getCollectionDef, sortAlbumsByRecent } from "@/lib/collections";
-import { THUMB, thumbUrl } from "@/lib/media-url";
+import { enlargeThumbnailLink } from "@/lib/heic";
+import { THUMB, fileUrl, thumbUrl } from "@/lib/media-url";
 import type {
   Album,
   AlbumCrumb,
@@ -36,7 +37,8 @@ const ALLOWED_VIDEO = new Set([
 
 export const PAGE_SIZE = 50;
 const COUNT_PAGE_SIZE = 1000;
-const COUNT_MAX_PAGES = 1;
+/** Cukup untuk album keluarga; 5 halaman ≈ 5000 anak langsung per folder. */
+const COUNT_MAX_PAGES = 5;
 const LITE_PAGE_SIZE = 100;
 const SUMMARY_CONCURRENCY = 8;
 const LIBRARY_MAX_ITEMS = 2000;
@@ -48,7 +50,6 @@ const META_TTL_MS = 10 * 60 * 1000;
  */
 const MAX_ALBUM_DEPTH = 8;
 const TREE_FOLDER_BUDGET = 400;
-const SUBTREE_FOLDER_BUDGET = 80;
 const PARENT_QUERY_CHUNK = 40;
 const DRIVE_LIST_CONCURRENCY = 12;
 
@@ -410,7 +411,7 @@ async function scanFolder(
     videoCount,
     gifCount,
     newestTime,
-    exact: mode === "full" || !pageToken,
+    exact: !pageToken,
   };
 }
 
@@ -419,15 +420,16 @@ function emptySummary(): AlbumSummary {
 }
 
 /**
- * Ringkasan cepat: hitungan hanya untuk isi langsung. Kalau folder cuma berisi
- * subfolder, sampulnya dipinjam dari folder anak supaya kartunya tidak kosong.
+ * Ringkasan beranda: hitungan hanya isi langsung folder (bukan isi subfolder).
+ * Mode full dipakai agar jumlah item/folder akurat; pohon anak tidak ditelusuri.
+ * Kalau folder cuma berisi subfolder, sampul dipinjam dari folder anak.
  */
 async function summarizeAlbumLite(
   albumId: string,
   depth = 0,
 ): Promise<AlbumSummary> {
   try {
-    const scan = await scanFolder(albumId, "lite");
+    const scan = await scanFolder(albumId, "full");
     let coverUrls = scan.coverUrls;
 
     if (coverUrls.length === 0 && scan.subFolderIds.length > 0 && depth < 2) {
@@ -435,15 +437,13 @@ async function summarizeAlbumLite(
       coverUrls = child.thumbnailUrls ?? [];
     }
 
-    // Hitungan disembunyikan bila ada subfolder; angka pastinya menyusul dari mode full.
-    const exact = scan.exact && scan.subFolderIds.length === 0;
     return {
       thumbnailUrl: coverUrls[0],
       thumbnailUrls: coverUrls,
-      itemCount: exact ? scan.count : undefined,
-      imageCount: exact ? scan.imageCount : undefined,
-      videoCount: exact ? scan.videoCount : undefined,
-      gifCount: exact ? scan.gifCount : undefined,
+      itemCount: scan.count,
+      imageCount: scan.imageCount,
+      videoCount: scan.videoCount,
+      gifCount: scan.gifCount,
       folderCount: scan.subFolderIds.length,
       modifiedTime: scan.newestTime,
     };
@@ -532,8 +532,13 @@ function toMediaItem(file: drive_v3.Schema$File, type: MediaType): MediaItem {
     type,
     mimeType: file.mimeType!,
     thumbnailUrl: thumbUrl(id, THUMB.grid),
-    previewUrl:
-      type === "image" ? thumbUrl(id, THUMB.view) : `/api/media/${id}/file`,
+    remoteThumbnailUrl: file.thumbnailLink
+      ? enlargeThumbnailLink(file.thumbnailLink, THUMB.grid)
+      : undefined,
+    // Foto: pratinjau Drive dulu (cepat), file asli menyusul di viewer.
+    // Video: langsung stream file (transcode terpisah bila perlu).
+    previewUrl: type === "image" ? thumbUrl(id, THUMB.view) : fileUrl(id),
+    fileUrl: fileUrl(id),
     downloadUrl: `/api/media/${id}/download`,
     durationMs: Number.isFinite(durationMs) ? durationMs : undefined,
     albumId: file.parents?.[0] ?? undefined,
@@ -601,14 +606,14 @@ async function listAlbumsFromDrive(mode: "lite" | "full"): Promise<Album[]> {
   }
 }
 
+/**
+ * Subfolder di dalam album: hanya nama + id (1 panggilan Drive).
+ * Jangan scan isi tiap folder di sini — itu yang membuat album besar terasa macet.
+ */
 async function listSubAlbumsFromDrive(albumId: string): Promise<Album[]> {
   try {
     const folders = await listChildFolders([albumId]);
-    const budget = { remaining: SUBTREE_FOLDER_BUDGET };
-    const albums = await mapPool(folders, SUMMARY_CONCURRENCY, async (folder) =>
-      toAlbum(folder, await summarizeAlbumFull(folder.id, budget)),
-    );
-    return sortAlbumsByRecent(albums);
+    return sortAlbumsByRecent(folders.map((folder) => toAlbum(folder)));
   } catch (err) {
     throw mapGoogleError(err);
   }
@@ -621,7 +626,7 @@ export async function getAlbums(fresh = false, opts: { details?: boolean } = {})
     revalidateTag("albums");
     return load();
   }
-  return unstable_cache(load, [details ? "albums-v7-full" : "albums-v7-lite"], {
+  return unstable_cache(load, [details ? "albums-v8-full" : "albums-v8-lite"], {
     tags: ["albums"],
     revalidate: details ? 600 : 180,
   })();
@@ -821,6 +826,16 @@ export async function getLibraryMedia(opts: {
   })();
 }
 
+function mediaCountFromScan(
+  scan: FolderScan,
+  typeFilter: string | undefined,
+) {
+  if (typeFilter === "image") return scan.imageCount;
+  if (typeFilter === "video") return scan.videoCount;
+  if (typeFilter === "gif") return scan.gifCount;
+  return scan.count;
+}
+
 export async function getAlbumWithMedia(
   albumId: string,
   pageToken: string | undefined,
@@ -838,15 +853,17 @@ export async function getAlbumWithMedia(
   const loadMedia = () =>
     listMediaFromDrive(albumId, pageToken, typeFilter, { skipAssert: true });
   const loadSubAlbums = () => listSubAlbumsFromDrive(albumId);
+  const loadCount = async () =>
+    mediaCountFromScan(await scanFolder(albumId, "full"), typeFilter);
 
-  // Subalbum hanya relevan di halaman pertama; halaman berikutnya murni media.
+  // Subalbum hanya di halaman pertama; cukup daftar folder (tanpa scan isi).
   const subAlbumsTask: Promise<Album[]> = pageToken
     ? Promise.resolve([])
     : fresh
       ? loadSubAlbums()
-      : unstable_cache(loadSubAlbums, ["sub-albums-v1", albumId], {
+      : unstable_cache(loadSubAlbums, ["sub-albums-v3-names", albumId], {
           tags: [tag, "albums"],
-          revalidate: 600,
+          revalidate: 300,
         })();
 
   const mediaTask =
@@ -857,7 +874,22 @@ export async function getAlbumWithMedia(
           revalidate: 600,
         })();
 
-  const [listed, subAlbums] = await Promise.all([mediaTask, subAlbumsTask]);
+  // Total album = isi langsung folder (sama seperti kartu di list), bukan
+  // panjang halaman media (PAGE_SIZE). Halaman berikutnya tidak menghitung ulang.
+  const countTask: Promise<number | undefined> = pageToken
+    ? Promise.resolve(undefined)
+    : fresh
+      ? loadCount()
+      : unstable_cache(loadCount, ["album-count-v1", albumId, typeFilter ?? "all"], {
+          tags: [tag, "albums"],
+          revalidate: 300,
+        })();
+
+  const [listed, subAlbums, total] = await Promise.all([
+    mediaTask,
+    subAlbumsTask,
+    countTask,
+  ]);
 
   const album = toAlbum(
     {
@@ -865,7 +897,10 @@ export async function getAlbumWithMedia(
       name: albumFile.name!,
       modifiedTime: albumFile.modifiedTime ?? undefined,
     },
-    { folderCount: pageToken ? undefined : subAlbums.length },
+    {
+      folderCount: pageToken ? undefined : subAlbums.length,
+      itemCount: pageToken || typeFilter ? undefined : total,
+    },
   );
 
   return {
@@ -873,7 +908,7 @@ export async function getAlbumWithMedia(
     breadcrumb,
     subAlbums,
     ...listed,
-    total: listed.nextPageToken ? undefined : listed.items.length,
+    total,
   };
 }
 

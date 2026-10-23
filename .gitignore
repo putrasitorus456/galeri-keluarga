@@ -25,6 +25,9 @@
 .DS_Store
 *.pem
 
+# local media caches (thumbnails + transcoded video)
+.data/
+
 # debug
 npm-debug.log*
 yarn-debug.log*

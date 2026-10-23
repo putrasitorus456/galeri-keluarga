@@ -22,11 +22,11 @@ const serwist = new Serwist({
         /^\/api\/media\/[^/]+\/thumbnail\/?$/.test(url.pathname) &&
         !request.headers.has("range"),
       handler: new CacheFirst({
-        cacheName: "gallery-media-files",
+        cacheName: "gallery-media-thumbs-v2",
         plugins: [
           new ExpirationPlugin({
-            maxEntries: 64,
-            maxAgeSeconds: 60 * 60,
+            maxEntries: 400,
+            maxAgeSeconds: 60 * 60 * 24 * 7,
             maxAgeFrom: "last-used",
           }),
           new RangeRequestsPlugin(),

@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { mkdir, readdir, rename, rm, stat, utimes } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readdir, rename, rm, stat, utimes } from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import ffmpegStatic from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";
+import { ensureDir, envMb, resolveCacheDir } from "@/lib/cache-dir";
 import { getFileStream } from "@/lib/drive";
 import { AppError, MESSAGES } from "@/lib/errors";
 
@@ -16,21 +16,12 @@ const CACHE_BUDGET_BYTES = envMb("VIDEO_CACHE_MAX_MB", 2048);
 const TRANSCODE_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_CONCURRENT_TRANSCODES = 1;
 
-function envMb(name: string, fallbackMb: number) {
-  const parsed = Number(process.env[name]);
-  const mb = Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMb;
-  return mb * 1024 * 1024;
-}
-
 export function mp4PreviewName(filename: string) {
   return filename.replace(/\.[^.]+$/, "") + ".mp4";
 }
 
 function cacheDir() {
-  return (
-    process.env.VIDEO_CACHE_DIR?.trim() ||
-    path.join(tmpdir(), "galeri-keluarga-video")
-  );
+  return resolveCacheDir("VIDEO_CACHE_DIR", "video");
 }
 
 function binary(name: "ffmpeg" | "ffprobe") {
@@ -197,8 +188,7 @@ async function transcode(fileId: string, sizeBytes: number) {
     throw new AppError("bad_request", MESSAGES.videoTooLarge, 413);
   }
 
-  const dir = cacheDir();
-  await mkdir(dir, { recursive: true });
+  const dir = await ensureDir(cacheDir());
   const output = path.join(dir, `${CACHE_VERSION}-${fileId}.mp4`);
   const source = path.join(dir, `${CACHE_VERSION}-${fileId}.src`);
   const partial = `${output}.part`;
@@ -236,19 +226,28 @@ async function transcode(fileId: string, sizeBytes: number) {
 
 const inFlight = new Map<string, Promise<string>>();
 
+function cachedOutputPath(fileId: string) {
+  return path.join(cacheDir(), `${CACHE_VERSION}-${fileId}.mp4`);
+}
+
+/** Stat-only lookup — does not download or transcode. */
+export async function getCachedPlayableVideo(fileId: string) {
+  const cached = cachedOutputPath(fileId);
+  const info = await stat(cached).catch(() => null);
+  if (!info?.isFile()) return null;
+  const now = new Date();
+  await utimes(cached, now, info.mtime).catch(() => undefined);
+  return { path: cached, size: info.size };
+}
+
 /**
  * Returns a local H.264/AAC MP4 for a Drive video, converting it on first use.
  * Needed because browsers other than Safari cannot decode the HEVC that iPhones
  * record into .MOV files.
  */
 export async function getPlayableVideo(fileId: string, sizeBytes: number) {
-  const cached = path.join(cacheDir(), `${CACHE_VERSION}-${fileId}.mp4`);
-  const info = await stat(cached).catch(() => null);
-  if (info?.isFile()) {
-    const now = new Date();
-    await utimes(cached, now, info.mtime).catch(() => undefined);
-    return { path: cached, size: info.size };
-  }
+  const hit = await getCachedPlayableVideo(fileId);
+  if (hit) return hit;
 
   let pending = inFlight.get(fileId);
   if (!pending) {

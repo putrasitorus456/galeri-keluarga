@@ -19,7 +19,24 @@ export function transcodedFileUrl(previewUrl: string, extra: Record<string, stri
   return `${url.pathname}${url.search}`;
 }
 
+export async function checkTranscodedPreview(previewUrl: string) {
+  const url = transcodedFileUrl(previewUrl, { prepare: "1", check: "1" });
+  try {
+    const res = await fetch(url, {
+      credentials: "include",
+      cache: "no-store",
+    });
+    if (!res.ok) return false;
+    const data = (await res.json()) as { ready?: unknown };
+    return data.ready === true;
+  } catch {
+    return false;
+  }
+}
+
 export async function prepareTranscodedPreview(previewUrl: string) {
+  if (await checkTranscodedPreview(previewUrl)) return;
+
   const url = transcodedFileUrl(previewUrl, { prepare: "1" });
   let lastError: Error | null = null;
 

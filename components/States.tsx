@@ -45,7 +45,13 @@ export function ErrorState({ message, onRetry }: ErrorStateProps) {
 
 export function AlbumSkeleton() {
   return (
-    <div className="space-y-8 px-4 pt-3">
+    <div
+      className="space-y-8 px-4 pt-3"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      aria-label="Memuat album"
+    >
       <div>
         <div className="mb-3 h-5 w-24 animate-pulse rounded bg-paper-deep" />
         <div className="grid grid-cols-3 gap-x-3 gap-y-5">
@@ -53,6 +59,7 @@ export function AlbumSkeleton() {
             <div key={i} className="flex flex-col items-center">
               <div className="aspect-square w-full animate-pulse rounded-[1.15rem] bg-paper-deep" />
               <div className="mt-2 h-3 w-16 animate-pulse rounded bg-paper-deep" />
+              <div className="mt-1.5 h-2.5 w-10 animate-pulse rounded bg-paper-deep/80" />
             </div>
           ))}
         </div>
@@ -67,7 +74,13 @@ export function AlbumSkeleton() {
 
 export function MediaSkeleton() {
   return (
-    <div className="grid grid-cols-3 gap-px sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
+    <div
+      className="grid grid-cols-3 gap-px sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      aria-label="Memuat kenangan"
+    >
       {Array.from({ length: 18 }).map((_, i) => (
         <div key={i} className="aspect-square animate-pulse bg-paper-deep" />
       ))}
